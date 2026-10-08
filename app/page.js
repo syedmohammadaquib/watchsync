@@ -31,6 +31,12 @@ function PosterCard({ item }) {
     );
 }
 
+function getColumnPosters(column) {
+    const offset = (column * 3) % videoData.length;
+    const rotated = [...videoData.slice(offset), ...videoData.slice(0, offset)];
+    return column % 2 === 0 ? rotated : [...rotated].reverse();
+}
+
 export default function Home() {
     const router = useRouter();
     const theme = useTheme("dark");
@@ -39,6 +45,8 @@ export default function Home() {
     const [roomCode, setRoomCode] = useState("");
     const [error, setError] = useState("");
     const [readyRoom, setReadyRoom] = useState(null);
+    const [linkCopied, setLinkCopied] = useState(false);
+    const [codeCopied, setCodeCopied] = useState(false);
 
     function handleSubmit(event) {
         event.preventDefault();
@@ -55,11 +63,35 @@ export default function Home() {
         const code = mode === "create" ? makeRoomCode() : cleanCode;
         const sessionId = mode === "create" ? crypto.randomUUID() : undefined;
         window.sessionStorage.setItem("watchsync-pending-join", JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
+        setLinkCopied(false);
+        setCodeCopied(false);
         setReadyRoom({ code, name: cleanName });
     }
 
     function enterRoom() {
         router.push(`/room/${readyRoom.code}`);
+    }
+
+    async function copyRoomLink() {
+        const roomUrl = `${window.location.origin}/room/${readyRoom.code}`;
+        try {
+            await navigator.clipboard.writeText(roomUrl);
+            setLinkCopied(true);
+            window.setTimeout(() => setLinkCopied(false), 2200);
+        } catch {
+            setError("Unable to copy the room link. Please copy the URL manually.");
+        }
+    }
+
+    async function copyRoomCode(event) {
+        event.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(readyRoom.code);
+            setCodeCopied(true);
+            window.setTimeout(() => setCodeCopied(false), 2000);
+        } catch {
+            setError("Unable to copy the room code. Please copy it manually.");
+        }
     }
 
     return (
@@ -68,7 +100,7 @@ export default function Home() {
                 <div className="exact-poster-grid">
                     {[0, 1, 2, 3, 4].map((column) => (
                         <div className={`exact-marquee-col exact-marquee-${column % 2 ? "down" : "up"} ${column > 2 ? "exact-hide-small" : ""}`} key={column}>
-                            {[...videoData, ...videoData].map((item, index) => <PosterCard item={item} key={`${column}-${index}`} />)}
+                            {[...getColumnPosters(column), ...getColumnPosters(column)].map((item, index) => <PosterCard item={item} key={`${column}-${index}`} />)}
                         </div>
                     ))}
                 </div>
@@ -86,19 +118,24 @@ export default function Home() {
                 </nav>
                 <section className="exact-landing-grid">
                     <div className="exact-copy">
-                        <p className="exact-kicker"><i /> Press play. Stay together.</p>
+                        <p className="exact-kicker"><i /> Ultra-Low Latency Sync Engine</p>
                         <h1>Watch together.<br /><em>In perfect sync.</em></h1>
                         <p className="exact-description">Create a private room for YouTube videos, live streams, and playlists. Shared timeline with zero drift and instant synchronized play, pause, and seek.</p>
-                        <div className="exact-features"><span>⚡ Sub-10ms Sync</span><span>▣ Live Chat &amp; Reactions</span><span>＋ Collaborative Queue</span></div>
+                        <div className="exact-features" aria-label="WatchSync features">
+                            <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></svg><b>Sub-10ms Sync</b></span>
+                            <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-6l-4 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /><path d="M8 10h.01M12 10h.01M16 10h.01" /></svg><b>Live Chat &amp; Reactions</b></span>
+                            <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><b>Collaborative Queue</b></span>
+                        </div>
                     </div>
                     <section className="exact-glass-panel" aria-labelledby="panel-title">
+                        <div className="exact-panel-edge" />
                         <div className="exact-panel-heading"><p>SESSION SETUP</p><h2 id="panel-title">{mode === "create" ? "Create a room" : "Join a room"}</h2></div>
                         <div className="exact-mode-switch" role="tablist">
                             <button className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setError(""); }} type="button">Create Room</button>
                             <button className={mode === "join" ? "active" : ""} onClick={() => { setMode("join"); setError(""); }} type="button">Join Room</button>
                         </div>
                         <form onSubmit={handleSubmit}>
-                            {mode === "join" && <label>Room Code <span>e.g. A7K2QX</span><input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="ENTER ROOM CODE" maxLength={8} autoCapitalize="characters" /></label>}
+                            {mode === "join" && <label>Room Code<input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="ENTER ROOM CODE" maxLength={8} autoCapitalize="characters" /></label>}
                             <label>Your Display Name<input value={name} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder="e.g. Alex, Sarah..." maxLength={32} autoFocus /></label>
                             {error && <p className="exact-error" role="alert">ⓘ <span>{error}</span></p>}
                             <button className="exact-primary-action" type="submit">{mode === "create" ? "Create Watch Room" : "Enter Watch Room"} <span>→</span></button>
@@ -108,7 +145,37 @@ export default function Home() {
                 </section>
                 <footer className="exact-footer"><span><i />WATCH TOGETHER, FROM ANYWHERE</span><b /><span>WATCHSYNC © 2026</span></footer>
             </div>
-            {readyRoom && <div className="exact-modal-backdrop"><section className="exact-modal" role="dialog" aria-modal="true" aria-labelledby="ready-title"><header><h2 id="ready-title"><i /> ROOM READY</h2><button onClick={() => setReadyRoom(null)} type="button" aria-label="Close">✕</button></header><p>Share this code with your friends to start watching together:</p><strong>{readyRoom.code}</strong><small>Host User: <b>{readyRoom.name}</b></small><button onClick={enterRoom} type="button">Enter Watch Room</button></section></div>}
+            {readyRoom && <div className="exact-modal-backdrop" onClick={() => setReadyRoom(null)}>
+                <section className="exact-modal" role="dialog" aria-modal="true" aria-labelledby="ready-title" onClick={(event) => event.stopPropagation()}>
+                    <div className="exact-modal-edge" />
+                    <header>
+                        <div>
+                            <p>SESSION SETUP</p>
+                            <h2 id="ready-title">Room ready</h2>
+                        </div>
+                        <button className="exact-modal-close" onClick={() => setReadyRoom(null)} type="button" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg></button>
+                    </header>
+                    <p className="exact-modal-message">Invite friends to watch together in synchronized real-time playback.</p>
+                    <div className="exact-room-code">
+                        <div><span>ROOM CODE</span><strong>{readyRoom.code}</strong></div>
+                        <button className={codeCopied ? "copied" : ""} onClick={copyRoomCode} type="button">
+                            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="10" rx="1.5" /><path d="M12 7V4.5A1.5 1.5 0 0 0 10.5 3h-6A1.5 1.5 0 0 0 3 4.5v8A1.5 1.5 0 0 0 4.5 14H7" /></svg>{codeCopied ? "Copied" : "Copy"}
+                        </button>
+                    </div>
+                    <div className="exact-modal-actions">
+                        <button className="exact-enter-room" onClick={enterRoom} type="button">
+                            <span>Open Watch Room</span>
+                        </button>
+                        <button className={`exact-copy-link ${linkCopied ? "copied" : ""}`} onClick={copyRoomLink} type="button">
+                            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="10" rx="1.5" /><path d="M12 7V4.5A1.5 1.5 0 0 0 10.5 3h-6A1.5 1.5 0 0 0 3 4.5v8A1.5 1.5 0 0 0 4.5 14H7" /></svg>{linkCopied ? "Link copied" : "Copy link"}
+                        </button>
+                    </div>
+                    <div className="exact-modal-privacy">
+                        <span><i aria-hidden="true">⌁</i> Private &amp; encrypted</span>
+                        <span>No signup needed</span>
+                    </div>
+                </section>
+            </div>}
         </main>
     );
 }

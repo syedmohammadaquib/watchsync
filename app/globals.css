@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -125,9 +126,10 @@
   --exact-bg: #fafafc;
   --exact-card: rgba(250, 250, 252, .78);
   --exact-text: #0f0f12;
+  --exact-muted: #69707d;
   --exact-secondary: #f0f0f5;
   --exact-border: #e1e1e8;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
   overflow: hidden;
   position: relative;
@@ -137,12 +139,14 @@
   --exact-bg: #0a0a0c;
   --exact-card: rgba(18, 18, 21, .78);
   --exact-text: #f3f4f6;
+  --exact-muted: #8b909c;
   --exact-secondary: #1e1e24;
   --exact-border: #2a2a35;
 }
 
 .exact-home { background: var(--exact-bg); color: var(--exact-text); transition: background .5s, color .5s; }
-.exact-perspective-stage { inset: 0; opacity: .65; overflow: hidden; perspective: 1200px; pointer-events: none; position: absolute; }
+.exact-light .exact-perspective-stage { opacity: .34; }
+.exact-perspective-stage { inset: 0; opacity: .38; overflow: hidden; perspective: 1200px; pointer-events: none; position: absolute; }
 .exact-poster-grid { display: flex; gap: 16px; height: 120%; justify-content: center; left: -80px; position: absolute; top: -80px; transform: rotateX(20deg) rotateY(-14deg) rotateZ(6deg) scale(1.32) translateY(-4%); transform-style: preserve-3d; width: calc(100% + 160px); }
 .exact-marquee-col { display: flex; flex-direction: column; flex-shrink: 0; gap: 16px; width: min(19vw, 240px); will-change: transform; }
 .exact-marquee-up { animation: exact-marquee-up 48s linear infinite; }
@@ -161,6 +165,7 @@
 .exact-ambient-one { background: rgba(255,0,0,.08); left: -6rem; top: -6rem; }
 .exact-ambient-two { background: rgba(245,158,11,.05); bottom: -6rem; right: -6rem; }
 .exact-vignette { background: radial-gradient(ellipse at center, transparent 25%, rgba(250,250,252,.92) 80%, #fafafc 100%); inset: 0; pointer-events: none; position: absolute; z-index: 2; }
+.exact-light .exact-vignette { background: radial-gradient(ellipse at center, rgba(250,250,252,.12) 8%, rgba(250,250,252,.82) 68%, #fafafc 100%); }
 .exact-dark .exact-vignette { background: radial-gradient(ellipse at center, transparent 25%, rgba(10,10,12,.92) 80%, #0a0a0c 100%); }
 .exact-main { box-sizing: border-box; display: flex; flex-direction: column; height: 100vh; max-height: 100vh; overflow: hidden; padding: 24px 32px; position: relative; z-index: 3; }
 .exact-topbar { align-items: center; display: flex; flex-shrink: 0; height: 48px; justify-content: space-between; }
@@ -174,13 +179,18 @@
 .exact-tools .theme-toggle span { font-size: 17px; }
 .exact-landing-grid { align-items: center; display: grid; flex: 1; gap: 8%; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 420px); margin: auto; max-width: 1152px; width: 100%; }
 .exact-copy { max-width: 640px; }
-.exact-kicker { align-items: center; color: #f00; display: flex; font-size: 12px; font-weight: 800; gap: 8px; letter-spacing: .14em; margin: 0 0 20px; text-transform: uppercase; }
-.exact-kicker i, .exact-footer i { background: #f00; display: inline-block; height: 7px; width: 7px; }
-.exact-copy h1 { font-size: clamp(48px, 6vw, 78px); letter-spacing: -.075em; line-height: .94; margin: 0 0 24px; }
-.exact-copy h1 em { color: #f00; font-style: normal; }
+.exact-kicker { align-items: center; background: rgba(255, 0, 0, .1); border: 1px solid rgba(255, 0, 0, .45); border-radius: 999px; color: #f00; display: inline-flex; font-size: 11px; font-weight: 800; gap: 8px; letter-spacing: .1em; margin: 0 0 20px; padding: 8px 14px; text-transform: uppercase; }
+.exact-kicker i, .exact-footer i { background: #f00; border-radius: 50%; display: inline-block; height: 7px; width: 7px; }
+.exact-copy h1 { color: var(--exact-text); font-family: Syne, "Plus Jakarta Sans", sans-serif; font-size: clamp(36px, 6vw, 60px); font-weight: 800; letter-spacing: -.055em; line-height: 1.08; margin: 0 0 24px; }
+.exact-copy h1 em { background: linear-gradient(90deg, #f00, #ef4444, #f59e0b); background-clip: text; color: transparent; font-family: inherit; font-style: normal; font-weight: inherit; letter-spacing: inherit; -webkit-background-clip: text; }
 .exact-description { color: var(--exact-text); font-size: 15px; line-height: 1.7; margin: 0; max-width: 540px; opacity: .7; }
-.exact-features { display: flex; flex-wrap: wrap; font-size: 10px; font-weight: 700; gap: 18px; margin-top: 30px; opacity: .7; text-transform: uppercase; }
-.exact-glass-panel { backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px); background: var(--exact-card); border: 1px solid var(--exact-border); box-shadow: 0 20px 70px rgba(0,0,0,.12); padding: 24px; }
+.exact-features { display: flex; flex-wrap: wrap; font-size: 11px; font-weight: 600; gap: 8px; margin-top: 30px; }
+.exact-features span { align-items: center; background: rgba(18, 18, 21, .72); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #e4e4e7; display: inline-flex; gap: 7px; padding: 7px 13px; }
+.exact-light .exact-features span { background: rgba(255, 255, 255, .78); border-color: rgba(15, 15, 18, .16); color: #202124; }
+.exact-features svg { fill: none; height: 14px; stroke: #f00; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; width: 14px; }
+.exact-features b { font-weight: 600; }
+.exact-glass-panel { backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px); background: color-mix(in srgb, var(--exact-card) 94%, var(--exact-bg)); border: 1px solid var(--exact-border); box-shadow: 0 20px 70px rgba(0,0,0,.12); padding: 24px; position: relative; }
+.exact-panel-edge { background: linear-gradient(90deg, #f00, #ef4444, #f59e0b); height: 2px; left: 0; position: absolute; right: 0; top: 0; }
 .exact-panel-heading { border-bottom: 1px solid var(--exact-border); padding-bottom: 12px; }
 .exact-panel-heading p { font-size: 11px; font-weight: 800; letter-spacing: .14em; margin: 0 0 4px; opacity: .6; }
 .exact-panel-heading h2 { font-size: 24px; letter-spacing: -.04em; margin: 0; }
@@ -199,16 +209,128 @@
 .exact-footer { align-items: center; display: flex; flex-shrink: 0; font-size: 10px; font-weight: 700; gap: 14px; letter-spacing: .12em; opacity: .6; text-transform: uppercase; }
 .exact-footer span { align-items: center; display: flex; gap: 8px; white-space: nowrap; }
 .exact-footer b { background: var(--exact-border); display: block; flex: 1; height: 1px; }
-.exact-modal-backdrop { align-items: center; background: rgba(0,0,0,.8); backdrop-filter: blur(8px); display: flex; inset: 0; justify-content: center; padding: 16px; position: fixed; z-index: 20; }
-.exact-modal { background: var(--exact-card); border: 2px solid #f00; box-shadow: 0 20px 60px rgba(0,0,0,.4); max-width: 380px; padding: 24px; width: 100%; }
-.exact-modal header { align-items: center; border-bottom: 1px solid var(--exact-border); display: flex; justify-content: space-between; padding-bottom: 12px; }
-.exact-modal h2 { color: #f00; font-size: 18px; margin: 0; }
-.exact-modal h2 i { background: #f00; display: inline-block; height: 10px; margin-right: 8px; width: 10px; }
-.exact-modal header button { background: none; border: 0; color: var(--exact-text); opacity: .6; }
-.exact-modal > p { font-size: 12px; font-weight: 600; margin: 18px 0 12px; opacity: .8; }
-.exact-modal > strong { background: var(--exact-secondary); border: 1px solid var(--exact-border); color: #f00; display: block; font-family: monospace; font-size: 24px; letter-spacing: .18em; padding: 14px; text-align: center; }
-.exact-modal > small { display: block; font-size: 12px; margin: 12px 0 20px; opacity: .8; }
-.exact-modal > button:last-child { background: #f00; border: 0; color: white; font-size: 12px; font-weight: 700; padding: 12px; text-transform: uppercase; width: 100%; }
+.exact-modal-backdrop { align-items: center; background: rgba(3, 4, 7, .64); backdrop-filter: blur(12px); display: flex; inset: 0; justify-content: center; padding: 16px; position: fixed; z-index: 20; }
+.exact-modal { background: var(--exact-card); border: 1px solid var(--exact-border); border-radius: 10px; box-shadow: 0 28px 90px rgba(0,0,0,.48); max-width: 380px; overflow: hidden; padding: 22px; position: relative; width: 100%; }
+.exact-modal-edge { background: #ff462e; height: 3px; left: 0; position: absolute; right: 0; top: 0; }
+.exact-modal header { align-items: flex-start; border-bottom: 1px solid var(--exact-border); display: flex; justify-content: space-between; margin-bottom: 13px; padding-bottom: 13px; }
+.exact-modal header p { color: #ff462e; font-size: 9px; font-weight: 800; letter-spacing: .18em; margin: 0 0 6px; text-transform: uppercase; }
+.exact-modal h2 { color: var(--exact-text); font-family: Syne, "Plus Jakarta Sans", sans-serif; font-size: 22px; letter-spacing: -.04em; margin: 0; text-transform: none; }
+.exact-modal-close { align-items: center; background: transparent; border: 0; border-radius: 5px; color: var(--exact-muted); display: flex; font-size: 24px; height: 26px; justify-content: center; line-height: 1; padding: 0; width: 26px; }
+.exact-modal-close:hover { background: var(--exact-secondary); color: var(--exact-text); }
+.exact-modal-message { color: var(--exact-muted); font-size: 12px; line-height: 1.55; margin: 0 0 15px; }
+.exact-room-code { align-items: center; background: var(--exact-bg); border: 1px solid var(--exact-border); border-radius: 5px; display: flex; justify-content: space-between; margin-bottom: 14px; padding: 10px 12px; }
+.exact-room-code div { display: flex; flex-direction: column; gap: 3px; }
+.exact-room-code span { color: var(--exact-muted); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.exact-room-code strong { color: #ff462e; font-family: monospace; font-size: 16px; letter-spacing: .1em; }
+.exact-room-code button { align-items: center; background: var(--exact-secondary); border: 1px solid transparent; border-radius: 4px; color: var(--exact-muted); display: flex; font-size: 11px; font-weight: 700; gap: 5px; padding: 7px 9px; }
+.exact-room-code button:hover { border-color: var(--exact-border); color: var(--exact-text); }
+.exact-room-code button.copied { background: rgba(16,185,129,.12); color: #34d399; }
+.exact-modal-actions { display: grid; gap: 8px; }
+.exact-copy-link, .exact-enter-room { align-items: center; border-radius: 5px; display: flex; font-size: 11px; font-weight: 700; justify-content: center; letter-spacing: .02em; padding: 10px 12px; width: 100%; }
+.exact-copy-link { background: transparent; border: 1px solid var(--exact-border); color: var(--exact-muted); gap: 7px; }
+.exact-copy-link:hover, .exact-copy-link.copied { background: var(--exact-secondary); border-color: var(--exact-border); color: var(--exact-text); }
+.exact-copy-link span { font-size: 15px; }
+.exact-enter-room { background: var(--exact-text); border: 0; color: var(--exact-bg); gap: 8px; }
+.exact-enter-room:hover { background: #ff462e; color: white; }
+.exact-enter-room b { font-size: 16px; font-weight: 400; transition: transform .2s ease; }
+.exact-enter-room:hover b { transform: translateX(3px); }
+.exact-modal-privacy { align-items: center; border-top: 1px solid var(--exact-border); color: var(--exact-muted); display: flex; font-size: 10px; justify-content: space-between; margin-top: 15px; padding-top: 12px; }
+.exact-modal-privacy span { align-items: center; display: flex; gap: 5px; }
+.exact-modal-privacy i { color: #ff462e; font-size: 15px; font-style: normal; }
+
+/* Room-ready dialog: carry the landing page's poster backdrop and red signal through. */
+.exact-modal-backdrop {
+  background: rgba(3, 4, 7, .72);
+  backdrop-filter: blur(16px) saturate(.82);
+  padding: 24px;
+}
+.exact-modal {
+  background: color-mix(in srgb, var(--exact-card) 90%, var(--exact-bg));
+  border-color: color-mix(in srgb, var(--exact-border) 78%, #ff462e 22%);
+  border-radius: 16px;
+  box-shadow: 0 32px 100px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.035) inset;
+  max-width: 440px;
+  padding: 28px;
+}
+.exact-modal-edge {
+  background: linear-gradient(90deg, #f00 0%, #ff462e 58%, #f59e0b 100%);
+  height: 3px;
+}
+.exact-modal header { margin-bottom: 17px; padding-bottom: 17px; }
+.exact-modal header p { color: #ff5544; font-size: 10px; letter-spacing: .16em; }
+.exact-modal h2 { font-size: 27px; letter-spacing: -.045em; }
+.exact-modal-message { font-size: 13px; line-height: 1.65; margin-bottom: 20px; }
+.exact-room-code {
+  background: color-mix(in srgb, var(--exact-bg) 82%, #ff462e 18%);
+  border-radius: 9px;
+  margin-bottom: 16px;
+  min-height: 76px;
+  padding: 14px 16px;
+}
+.exact-room-code span { font-size: 10px; letter-spacing: .16em; }
+.exact-room-code strong { color: #ff5544; font-size: 20px; letter-spacing: .14em; }
+.exact-room-code button { border-radius: 7px; padding: 9px 12px; }
+.exact-modal-actions { gap: 10px; }
+.exact-copy-link, .exact-enter-room { border-radius: 9px; font-size: 12px; min-height: 48px; }
+.exact-enter-room { background: linear-gradient(105deg, #f01313, #ff4938 72%, #ef5a32); color: white; box-shadow: 0 8px 24px rgba(255, 35, 30, .2); }
+.exact-enter-room:hover { background: linear-gradient(105deg, #d90000, #ed3829 72%, #dc4726); }
+.exact-copy-link:hover, .exact-copy-link.copied { border-color: color-mix(in srgb, var(--exact-border) 72%, #ff462e 28%); }
+.exact-modal-privacy { font-size: 11px; margin-top: 18px; padding-top: 15px; }
+.exact-light .exact-modal {
+  background: rgba(250, 250, 252, .96);
+  border-color: rgba(15, 15, 18, .12);
+  box-shadow: 0 32px 100px rgba(10, 10, 12, .3), 0 0 0 1px rgba(255,255,255,.7) inset;
+}
+.exact-light .exact-room-code { background: #fff; }
+.exact-dark .exact-modal { background: rgba(18, 18, 21, .96); }
+.exact-room-code {
+  min-height: 0;
+  padding: 10px 12px;
+}
+.exact-room-code strong { font-size: 17px; }
+.exact-room-code button { padding: 7px 10px; }
+.exact-modal,
+.exact-modal button { font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif; }
+.exact-modal h2 { font-family: inherit; font-weight: 800; letter-spacing: -.045em; }
+.exact-modal header p { letter-spacing: .13em; }
+.exact-room-code button svg,
+.exact-copy-link svg { fill: none; height: 16px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; width: 16px; }
+.exact-room-code button { color: var(--exact-text); font-size: 12px; gap: 7px; }
+.exact-modal-actions { gap: 8px; }
+.exact-copy-link, .exact-enter-room { font-weight: 700; letter-spacing: 0; }
+.exact-enter-room { background: #f04438; box-shadow: 0 5px 15px rgba(240, 68, 56, .18); }
+.exact-enter-room:hover { background: #dc3028; }
+.exact-copy-link { background: var(--exact-secondary); }
+.exact-copy-link:hover, .exact-copy-link.copied { background: color-mix(in srgb, var(--exact-secondary) 80%, #ff462e 20%); }
+.exact-modal-privacy svg { fill: none; height: 15px; stroke: #ff5544; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; width: 15px; }
+.exact-modal-close {
+  background: transparent;
+  height: 34px;
+  margin: -4px -4px 0 0;
+  position: relative;
+  transition: color .18s ease;
+  width: 34px;
+}
+.exact-modal-close svg { display: block; fill: none; height: 16px; left: 50%; position: absolute; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; top: 50%; transform: translate(-50%, -50%); width: 16px; }
+.exact-modal-close:hover { background: transparent; color: var(--exact-text); }
+.exact-light .exact-modal-close:hover { background: transparent; color: #0f0f12; }
+.exact-dark .exact-modal-close:hover { background: transparent; color: #fff; }
+.exact-modal-close:focus-visible { outline: 2px solid #ff5544; outline-offset: 2px; }
+.exact-modal-close:active { background: transparent; color: #ff5544; }
+.exact-room-code strong {
+  color: #e43d32;
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: .09em;
+}
+.exact-dark .exact-room-code strong { color: #ff6b5d; }
+.exact-room-code span { letter-spacing: .12em; }
+@media (max-width: 600px) {
+  .exact-modal { padding: 24px; }
+  .exact-room-code { min-height: 0; padding: 10px 12px; }
+  .exact-room-code strong { font-size: 17px; }
+}
 @keyframes exact-marquee-up { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -50%, 0); } }
 @keyframes exact-marquee-down { from { transform: translate3d(0, -50%, 0); } to { transform: translate3d(0, 0, 0); } }
 @media (max-width: 800px) {
@@ -219,6 +341,15 @@
   .exact-copy h1 { font-size: 50px; }
   .exact-hide-small { display: none; }
   .exact-footer { font-size: 8px; }
+}
+@media (max-width: 600px) {
+  .exact-copy { display: none; }
+  .exact-landing-grid { align-items: center; display: flex; justify-content: center; min-height: 0; padding: 24px 0; }
+  .exact-glass-panel { max-width: 420px; width: 100%; }
+  .exact-footer { display: none; }
+  .exact-modal { border-radius: 15px; padding: 22px; }
+  .exact-room-code { min-height: 58px; padding: 10px 13px; }
+  .exact-room-code strong { font-size: 21px; }
 }
 
 body {
@@ -2211,4 +2342,50 @@ input:focus {
   .room-heading strong {
     max-width: 100%;
   }
+}
+
+/* Keep the room-code strip compact and balanced in both themes. */
+.exact-room-code {
+  min-height: 0;
+  padding: 7px 11px;
+}
+.exact-room-code div { gap: 2px; }
+.exact-room-code span { line-height: 1.2; }
+.exact-room-code strong { font-size: 17px; line-height: 1.25; }
+.exact-room-code button { padding: 6px 9px; }
+.exact-dark .exact-room-code button {
+  background: #292a30;
+  border-color: #3a3b43;
+  color: #e8e9ee;
+}
+.exact-dark .exact-room-code button:hover { background: #34353d; }
+.exact-modal-actions {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.exact-copy-link, .exact-enter-room {
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+@media (max-width: 360px) {
+  .exact-copy-link, .exact-enter-room { font-size: 10px; }
+  .exact-copy-link svg { height: 14px; width: 14px; }
+}
+.exact-room-code button.copied,
+.exact-room-code button.copied:hover,
+.exact-copy-link.copied,
+.exact-copy-link.copied:hover {
+  background: rgba(16, 185, 129, .14);
+  border-color: rgba(16, 185, 129, .38);
+  color: #16834f;
+}
+.exact-dark .exact-room-code button.copied,
+.exact-dark .exact-room-code button.copied:hover,
+.exact-dark .exact-copy-link.copied,
+.exact-dark .exact-copy-link.copied:hover {
+  background: rgba(16, 185, 129, .16);
+  border-color: rgba(52, 211, 153, .36);
+  color: #4ade80;
 }
