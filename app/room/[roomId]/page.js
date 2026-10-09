@@ -11,6 +11,7 @@ export default function App() {
   const duration = 180;
   const [currentTab, setCurrentTab] = useState("chat");
   const [showVolumePopup, setShowVolumePopup] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [videoUrl, setVideoUrl] = useState("https://www.youtube.com/watch?v=jfKfPfyJRdk");
@@ -206,7 +207,7 @@ export default function App() {
         }
       `}</style>
       {/* Top Navigation Header */}
-      <header className={`h-16 px-4 md:px-7 border-b flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl transition-colors ${
+      <header className={`room-header h-16 px-4 md:px-7 border-b flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl transition-colors ${
         isDark ? "bg-[#0F0F0F]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
       }`}>
         {/* Left: Brand + Room Code Badge */}
@@ -303,7 +304,7 @@ export default function App() {
       </header>
 
       {/* Main Workspace Theater */}
-      <main className="flex-1 w-full max-w-[1720px] mx-auto p-3 sm:p-5 md:p-6 lg:p-7 flex flex-col justify-start">
+      <main className="room-workspace flex-1 w-full max-w-[1720px] mx-auto p-3 sm:p-5 md:p-6 lg:p-7 flex flex-col justify-start">
         {/* Equal-Height Synchronized Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_410px] gap-4 items-stretch">
           
@@ -313,7 +314,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-3 items-stretch">
               
               {/* Video Player Frame */}
-              <div className={`relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
+              <div className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
                 isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
               }`}>
                 {/* Embedded YouTube Player */}
@@ -350,7 +351,7 @@ export default function App() {
                   <span>You have host control</span>
                 </div>
 
-                {/* Lightweight Instagram-Style Floating Reactions (Pure emoji, no heavy background or text) */}
+                {/* Floating reactions remain emoji-based; the trigger below uses a regular icon. */}
                 <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
                   {reactions.map((r) => (
                     <div
@@ -365,40 +366,65 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
+                {/* Vertical reaction picker */}
+                <div className="reaction-launcher absolute bottom-4 right-4 z-30 flex flex-col items-end">
+                  <div
+                      className={`reaction-picker ${showReactionPicker ? "is-open" : "is-closed"} flex flex-col items-center gap-0.5 rounded-xl border p-1 shadow-2xl backdrop-blur-xl ${
+                        isDark
+                          ? "border-white/15 bg-[#12141a]/95"
+                          : "border-black/10 bg-white/95"
+                      }`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {[
+                        { emoji: "🔥", name: "Fire (1)" },
+                        { emoji: "❤️", name: "Love (2)" },
+                        { emoji: "👏", name: "Clap (3)" },
+                        { emoji: "😂", name: "Haha (4)" },
+                        { emoji: "⚡", name: "Hype (5)" },
+                        { emoji: "😮", name: "Woah (6)" },
+                      ].map((item) => (
+                        <button
+                          key={item.emoji}
+                          type="button"
+                          onClick={() => {
+                            triggerReaction(item.emoji);
+                            setShowReactionPicker(false);
+                          }}
+                          className="reaction-option flex h-7 w-7 items-center justify-center rounded-lg text-base transition-transform hover:scale-110 active:scale-90"
+                          style={{ "--reaction-delay": `${item.emoji === "🔥" ? 0 : ["❤️", "👏", "😂", "⚡", "😮"].indexOf(item.emoji) + 1}0ms` }}
+                          title={item.name}
+                          aria-label={item.name}
+                        >
+                          {item.emoji}
+                        </button>
+                      ))}
+                    </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowReactionPicker((open) => !open);
+                    }}
+                    className="reaction-trigger flex h-8 w-8 items-center justify-center transition-all hover:scale-110 active:scale-95"
+                    title="Send a reaction"
+                    aria-label="Send a reaction"
+                    aria-expanded={showReactionPicker}
+                  >
+                    <svg aria-hidden="true" className="reaction-trigger-icon h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.75l1.34 4.91a2 2 0 001.41 1.41L19.66 11.4l-4.91 1.34a2 2 0 00-1.41 1.41L12 19.06l-1.34-4.91a2 2 0 00-1.41-1.41L4.34 12.74l4.91-1.34a2 2 0 001.41-1.41L12 3.75z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.25 4.5v2.25m1.125-1.125h-2.25M5.5 17.25v1.5m.75-.75H4.75" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
-              {/* Beside-the-Player Instant Reaction Rail */}
-              <aside className={`flex sm:flex-col items-center justify-between sm:justify-center gap-1.5 px-3 py-2 sm:px-2.5 sm:py-3.5 border rounded-2xl shadow-lg shrink-0 backdrop-blur-md transition-colors ${
-                isDark ? "bg-[#181818]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
-              }`}>
-                <div className="hidden sm:flex flex-col items-center pb-2 border-b border-inherit w-full">
-                  <span className="text-[9px] uppercase tracking-wider font-bold opacity-50">React</span>
-                </div>
-
-                <div className="flex sm:flex-col items-center gap-1.5 w-full justify-around sm:justify-start">
-                  {[
-                    { emoji: "🔥", name: "Fire (1)" },
-                    { emoji: "❤️", name: "Love (2)" },
-                    { emoji: "👏", name: "Clap (3)" },
-                    { emoji: "😂", name: "Haha (4)" },
-                    { emoji: "⚡", name: "Hype (5)" },
-                    { emoji: "😮", name: "Woah (6)" },
-                  ].map((item) => (
-                    <button
-                      key={item.emoji}
-                      onClick={() => triggerReaction(item.emoji)}
-                      className="p-2 rounded-xl hover:scale-125 active:scale-90 transition-transform flex items-center justify-center select-none"
-                      title={item.name}
-                    >
-                      <span className="text-xl filter drop-shadow">{item.emoji}</span>
-                    </button>
-                  ))}
-                </div>
-              </aside>
             </div>
 
             {/* Playback Controls Bar */}
-            <div className={`playback-controls w-full border p-3 sm:p-3.5 rounded-2xl flex flex-col sm:flex-row items-center gap-3 sm:gap-4 shadow-lg transition-colors ${
+            <div className={`playback-controls w-full border p-2 sm:py-1.5 sm:px-2.5 rounded-2xl flex flex-col sm:flex-row items-center gap-2 sm:gap-3 shadow-lg transition-colors ${
               isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
             }`}>
               {/* Timecode & Scrubber with #FF0000 Accent */}
