@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 
 export default function App() {
   const [isDark, setIsDark] = useState(true);
@@ -53,6 +53,34 @@ export default function App() {
   const chatAnchorRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const videoStageRef = useRef(null);
+  const roomTabsRef = useRef(null);
+  const roomTabContentRefs = useRef({});
+  const [tabCapsuleStyle, setTabCapsuleStyle] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const tabs = roomTabsRef.current;
+    const content = roomTabContentRefs.current[currentTab];
+    if (!tabs || !content) return;
+
+    const updateCapsulePosition = () => {
+      const tabsRect = tabs.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const horizontalInset = 14;
+      const verticalInset = 8;
+      setTabCapsuleStyle({
+        left: contentRect.left - tabsRect.left - horizontalInset,
+        top: contentRect.top - tabsRect.top - verticalInset,
+        width: contentRect.width + horizontalInset * 2,
+        height: contentRect.height + verticalInset * 2,
+      });
+    };
+
+    updateCapsulePosition();
+    const observer = new ResizeObserver(updateCapsulePosition);
+    observer.observe(tabs);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [currentTab]);
 
   const showToastMsg = (msg) => {
     setToast(msg);
@@ -187,9 +215,8 @@ export default function App() {
   };
 
   return (
-    <div className={`watch-room-page ${!isDark ? "theme-light" : "theme-dark"} min-h-screen flex flex-col font-sans transition-colors duration-200 antialiased selection:bg-[#FF0000] selection:text-white ${
-      isDark ? "bg-[#0F0F0F] text-[#F1F1F1]" : "bg-[#F8F8F9] text-[#0F0F0F]"
-    }`}>
+    <div className={`watch-room-page ${!isDark ? "theme-light" : "theme-dark"} min-h-screen flex flex-col font-sans transition-colors duration-200 antialiased selection:bg-[#FF0000] selection:text-white ${isDark ? "bg-[#0F0F0F] text-[#F1F1F1]" : "bg-[#F8F8F9] text-[#0F0F0F]"
+      }`}>
       <style>{`
         @keyframes igReactionFloat {
           0% {
@@ -215,9 +242,8 @@ export default function App() {
         }
       `}</style>
       {/* Top Navigation Header */}
-      <header className={`room-header h-16 px-4 md:px-7 border-b flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl transition-colors ${
-        isDark ? "bg-[#0F0F0F]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
-      }`}>
+      <header className={`room-header h-16 px-4 md:px-7 border-b flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl transition-colors ${isDark ? "bg-[#0F0F0F]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
+        }`}>
         {/* Left: Brand + Room Code Badge */}
         <div className="flex items-center gap-3 sm:gap-5">
           <div className="flex items-center gap-2 select-none cursor-pointer">
@@ -234,9 +260,8 @@ export default function App() {
               navigator.clipboard?.writeText("sync-8842");
               showToastMsg("Room code 'sync-8842' copied!");
             }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border cursor-pointer transition select-none ${
-              isDark ? "bg-[#181818] border-[#272727] hover:border-neutral-600" : "bg-[#F2F2F2] border-[#E5E5E5] hover:border-neutral-400"
-            }`}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border cursor-pointer transition select-none ${isDark ? "bg-[#181818] border-[#272727] hover:border-neutral-600" : "bg-[#F2F2F2] border-[#E5E5E5] hover:border-neutral-400"
+              }`}
             title="Click to copy Room Code"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-[#FF0000] animate-pulse"></span>
@@ -245,9 +270,8 @@ export default function App() {
           </div>
 
           {/* Synchronized Watchers Badge */}
-          <div className={`hidden lg:flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${
-            isDark ? "bg-[#181818] border-[#272727] text-neutral-300" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700"
-          }`}>
+          <div className={`hidden lg:flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${isDark ? "bg-[#181818] border-[#272727] text-neutral-300" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700"
+            }`}>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span>14,290 synchronized watchers</span>
           </div>
@@ -261,9 +285,8 @@ export default function App() {
               setIsDark(!isDark);
               showToastMsg(!isDark ? "Dark mode activated" : "Light mode activated");
             }}
-            className={`p-2 rounded-xl border transition ${
-              isDark ? "bg-[#181818] border-[#272727] text-neutral-300 hover:text-white" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700 hover:text-black"
-            }`}
+            className={`p-2 rounded-xl border transition ${isDark ? "bg-[#181818] border-[#272727] text-neutral-300 hover:text-white" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700 hover:text-black"
+              }`}
             title="Toggle theme"
           >
             {isDark ? (
@@ -281,13 +304,12 @@ export default function App() {
           {/* Copy Link Button */}
           <button
             onClick={handleCopyLink}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition shadow-sm active:scale-95 ${
-              copiedLink
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
-                : isDark
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition shadow-sm active:scale-95 ${copiedLink
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
+              : isDark
                 ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
                 : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
-            }`}
+              }`}
           >
             {copiedLink ? (
               <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -315,16 +337,15 @@ export default function App() {
       <main className="room-workspace flex-1 w-full max-w-[1720px] mx-auto p-3 sm:p-5 md:p-6 lg:p-7 flex flex-col justify-start">
         {/* Equal-Height Synchronized Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_410px] gap-4 items-stretch">
-          
+
           {/* Left Column: Video Stage + Controls Bar */}
           <section className="flex flex-col gap-3 min-w-0">
             {/* Video Canvas Row + Dedicated Instant Reaction Rail */}
             <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-              
+
               {/* Video Player Frame */}
-              <div ref={videoStageRef} className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
-                isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
-              }`}>
+              <div ref={videoStageRef} className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
+                }`}>
                 {/* Embedded YouTube Player */}
                 <iframe
                   className="w-full h-full pointer-events-none"
@@ -334,27 +355,9 @@ export default function App() {
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 />
 
-                {/* Clickable Overlay with Pure Floating Icon (NO Gray Box) */}
-                <div
-                  onClick={() => {
-                    setIsPlaying(!isPlaying);
-                    showToastMsg(!isPlaying ? "Stream Resumed" : "Stream Paused");
-                  }}
-                  className="absolute inset-0 z-10 cursor-pointer flex items-center justify-center bg-black/10 hover:bg-black/25 transition group/overlay"
-                >
-                  <div className={`text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)] flex items-center justify-center transition-all duration-200 select-none pointer-events-none ${
-                    isPlaying ? "opacity-0 scale-90 group-hover/overlay:opacity-100 group-hover/overlay:scale-100" : "opacity-95 scale-100"
-                  }`}>
-                    <span className="text-5xl md:text-6xl font-black">
-                      {isPlaying ? "❚❚" : "▶"}
-                    </span>
-                  </div>
-                </div>
-
                 {/* Top-Left Host Control Badge */}
-                <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${
-                  isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
-                }`}>
+                <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
+                  }`}>
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span>You have host control</span>
                 </div>
@@ -378,37 +381,36 @@ export default function App() {
                 {/* Vertical reaction picker */}
                 <div className="reaction-launcher absolute bottom-4 right-4 z-30 flex flex-col items-end">
                   <div
-                      className={`reaction-picker ${showReactionPicker ? "is-open" : "is-closed"} flex flex-col items-center gap-0.5 rounded-xl border p-1 shadow-2xl backdrop-blur-xl ${
-                        isDark
-                          ? "border-white/15 bg-[#12141a]/95"
-                          : "border-black/10 bg-white/95"
+                    className={`reaction-picker ${showReactionPicker ? "is-open" : "is-closed"} flex flex-col items-center gap-0.5 rounded-xl border p-1 shadow-2xl backdrop-blur-xl ${isDark
+                      ? "border-white/15 bg-[#12141a]/95"
+                      : "border-black/10 bg-white/95"
                       }`}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {[
-                        { emoji: "🔥", name: "Fire (1)" },
-                        { emoji: "❤️", name: "Love (2)" },
-                        { emoji: "👏", name: "Clap (3)" },
-                        { emoji: "😂", name: "Haha (4)" },
-                        { emoji: "⚡", name: "Hype (5)" },
-                        { emoji: "😮", name: "Woah (6)" },
-                      ].map((item) => (
-                        <button
-                          key={item.emoji}
-                          type="button"
-                          onClick={() => {
-                            triggerReaction(item.emoji);
-                            setShowReactionPicker(false);
-                          }}
-                          className="reaction-option flex h-7 w-7 items-center justify-center rounded-lg text-base transition-transform hover:scale-110 active:scale-90"
-                          style={{ "--reaction-delay": `${item.emoji === "🔥" ? 0 : ["❤️", "👏", "😂", "⚡", "😮"].indexOf(item.emoji) + 1}0ms` }}
-                          title={item.name}
-                          aria-label={item.name}
-                        >
-                          {item.emoji}
-                        </button>
-                      ))}
-                    </div>
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {[
+                      { emoji: "🔥", name: "Fire (1)" },
+                      { emoji: "❤️", name: "Love (2)" },
+                      { emoji: "👏", name: "Clap (3)" },
+                      { emoji: "😂", name: "Haha (4)" },
+                      { emoji: "⚡", name: "Hype (5)" },
+                      { emoji: "😮", name: "Woah (6)" },
+                    ].map((item) => (
+                      <button
+                        key={item.emoji}
+                        type="button"
+                        onClick={() => {
+                          triggerReaction(item.emoji);
+                          setShowReactionPicker(false);
+                        }}
+                        className="reaction-option flex h-7 w-7 items-center justify-center rounded-lg text-base transition-transform hover:scale-110 active:scale-90"
+                        style={{ "--reaction-delay": `${item.emoji === "🔥" ? 0 : ["❤️", "👏", "😂", "⚡", "😮"].indexOf(item.emoji) + 1}0ms` }}
+                        title={item.name}
+                        aria-label={item.name}
+                      >
+                        {item.emoji}
+                      </button>
+                    ))}
+                  </div>
 
                   <button
                     type="button"
@@ -432,15 +434,13 @@ export default function App() {
             </div>
 
             {/* Playback Controls Bar */}
-            <div className={`playback-controls w-full border p-2 sm:py-1.5 sm:px-2.5 rounded-2xl flex flex-col sm:flex-row items-center gap-2 sm:gap-3 shadow-lg transition-colors ${
-              isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
-            }`}>
+            <div className={`playback-controls w-full border p-2 sm:py-1.5 sm:px-2.5 rounded-2xl flex flex-col sm:flex-row items-center gap-2 sm:gap-3 shadow-lg transition-colors ${isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
+              }`}>
               {/* Timecode & Scrubber with #FF0000 Accent */}
               <div className="flex-1 w-full flex items-center gap-3">
                 <div className="relative w-full flex items-center">
-                  <div className={`absolute left-0 right-0 h-1.5 rounded-full pointer-events-none overflow-hidden ${
-                    isDark ? "bg-[#272727]" : "bg-[#E5E5E5]"
-                  }`}>
+                  <div className={`absolute left-0 right-0 h-1.5 rounded-full pointer-events-none overflow-hidden ${isDark ? "bg-[#272727]" : "bg-[#E5E5E5]"
+                    }`}>
                     <div
                       className="h-full bg-[#FF0000] transition-all"
                       style={{ width: `${(currentTime / duration) * 100}%` }}
@@ -463,33 +463,6 @@ export default function App() {
 
               {/* Playback utility buttons */}
               <div className="playback-actions flex items-center gap-1.5 self-end sm:self-auto shrink-0">
-                <div className="skip-controls flex items-center gap-0">
-                <button
-                  type="button"
-                  onClick={() => seekBy(-10)}
-                  className="playback-icon skip-button"
-                  title="Skip back 10 seconds"
-                  aria-label="Skip back 10 seconds"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M6.2 6.2H3.4V3.4M6.2 6.2A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => seekBy(10)}
-                  className="playback-icon skip-button"
-                  title="Skip forward 10 seconds"
-                  aria-label="Skip forward 10 seconds"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M17.8 6.2h2.8V3.4M17.8 6.2A8 8 0 1 0 20 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
-                  </svg>
-                </button>
-                </div>
-
                 <button
                   type="button"
                   onClick={() => setIsPlaying((playing) => !playing)}
@@ -507,6 +480,33 @@ export default function App() {
                     </svg>
                   )}
                 </button>
+
+                <div className="skip-controls flex items-center gap-0">
+                  <button
+                    type="button"
+                    onClick={() => seekBy(-10)}
+                    className="playback-icon skip-button"
+                    title="Skip back 10 seconds"
+                    aria-label="Skip back 10 seconds"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M6.2 6.2H3.4V3.4M6.2 6.2A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => seekBy(10)}
+                    className="playback-icon skip-button"
+                    title="Skip forward 10 seconds"
+                    aria-label="Skip forward 10 seconds"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M17.8 6.2h2.8V3.4M17.8 6.2A8 8 0 1 0 20 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
+                    </svg>
+                  </button>
+                </div>
 
                 {/* Familiar, inline player volume control */}
                 <div className={`volume-control relative flex items-center${showVolumeSlider ? " volume-slider-open" : ""}`}>
@@ -567,11 +567,10 @@ export default function App() {
                 {/* Fullscreen Button */}
                 <button
                   onClick={toggleFullscreen}
-                  className={`playback-icon ${
-                    isDark
-                      ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
-                      : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
-                  }`}
+                  className={`playback-icon ${isDark
+                    ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
+                    : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
+                    }`}
                   title="Toggle fullscreen"
                   aria-label="Toggle fullscreen"
                 >
@@ -598,87 +597,41 @@ export default function App() {
           </section>
 
           {/* Right Column: Sidebar locked to match video column height */}
-          <aside className={`room-sidebar w-full rounded-2xl md:rounded-3xl border flex flex-col h-full min-h-[460px] overflow-hidden transition-colors shadow-lg ${
-            isDark ? "bg-[#141414] border-[#272727]" : "bg-white border-[#E5E5E5]"
-          }`}>
-            {/* 1/3 Segmented Tab Capsule */}
-            <div className="p-3 border-b border-inherit shrink-0">
-              <div className={`relative flex items-center p-1 border rounded-2xl shadow-inner select-none ${
-                isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F2F2F2] border-[#E5E5E5]"
-              }`}>
-                {/* Fluid Sliding Glider Pill */}
+          <aside className={`room-sidebar w-full rounded-2xl md:rounded-3xl border flex flex-col h-full min-h-[460px] overflow-hidden transition-colors shadow-lg ${isDark ? "bg-[#141414] border-[#272727]" : "bg-white border-[#E5E5E5]"
+            }`}>
+            {/* Sidebar navigation */}
+            <div className="room-sidebar-tabs-shell border-b border-inherit shrink-0">
+              <div ref={roomTabsRef} className={`room-sidebar-tabs${isDark ? "" : " is-light"}`}>
                 <div
-                  className={`absolute rounded-xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-sm pointer-events-none ${
-                    isDark ? "bg-[#272727]" : "bg-white"
-                  }`}
-                  style={{
-                    width: "calc((100% - 8px) / 3)",
-                    top: "4px",
-                    bottom: "4px",
-                    left:
-                      currentTab === "chat"
-                        ? "4px"
-                        : currentTab === "audience"
-                        ? "calc(4px + (100% - 8px) / 3)"
-                        : "calc(4px + ((100% - 8px) / 3) * 2)",
-                  }}
+                  className="room-sidebar-tab-indicator"
+                  style={tabCapsuleStyle}
                 />
 
                 <button
                   type="button"
                   onClick={() => setCurrentTab("chat")}
-                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center focus:outline-none ${
-                    currentTab === "chat"
-                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
-                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
-                  }`}
+                  className={`room-sidebar-tab${currentTab === "chat" ? " is-active" : ""}`}
                 >
-                  Live Chat
+                  <span ref={(node) => { roomTabContentRefs.current.chat = node; }} className="room-sidebar-tab-content">Live Chat</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setCurrentTab("audience")}
-                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center gap-1.5 focus:outline-none ${
-                    currentTab === "audience"
-                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
-                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
-                  }`}
+                  className={`room-sidebar-tab${currentTab === "audience" ? " is-active" : ""}`}
                 >
-                  <span>Audience</span>
-                  <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none shrink-0 transition-colors ${
-                    currentTab === "audience"
-                      ? isDark
-                        ? "bg-[#181818] text-white"
-                        : "bg-[#E5E5E5] text-black"
-                      : isDark
-                      ? "bg-[#272727] text-neutral-400"
-                      : "bg-[#E5E5E5] text-neutral-600"
-                  }`}>
-                    3
+                  <span ref={(node) => { roomTabContentRefs.current.audience = node; }} className="room-sidebar-tab-content">
+                    <span>Audience</span>
                   </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setCurrentTab("queue")}
-                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center gap-1.5 focus:outline-none ${
-                    currentTab === "queue"
-                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
-                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
-                  }`}
+                  className={`room-sidebar-tab${currentTab === "queue" ? " is-active" : ""}`}
                 >
-                  <span>Queue</span>
-                  <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none shrink-0 transition-colors ${
-                    currentTab === "queue"
-                      ? isDark
-                        ? "bg-[#181818] text-white"
-                        : "bg-[#E5E5E5] text-black"
-                      : isDark
-                      ? "bg-[#272727] text-neutral-400"
-                      : "bg-[#E5E5E5] text-neutral-600"
-                  }`}>
-                    3
+                  <span ref={(node) => { roomTabContentRefs.current.queue = node; }} className="room-sidebar-tab-content">
+                    <span>Queue</span>
                   </span>
                 </button>
               </div>
@@ -695,23 +648,21 @@ export default function App() {
                           {msg.name}
                         </span>
                         {msg.badge && (
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${
-                            isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
-                          }`}>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
+                            }`}>
                             {msg.badge}
                           </span>
                         )}
                         {msg.time && <span className="text-[10px] opacity-40">{msg.time}</span>}
                       </div>
-                      <p className={`border rounded-2xl px-3.5 py-2 mt-0.5 self-start break-words max-w-[90%] shadow-sm text-xs ${
-                        msg.isSystem
-                          ? isDark
-                            ? "bg-[#181818] border-[#272727] text-neutral-400"
-                            : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
-                          : isDark
+                      <p className={`border rounded-2xl px-3.5 py-2 mt-0.5 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
+                        ? isDark
+                          ? "bg-[#181818] border-[#272727] text-neutral-400"
+                          : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
+                        : isDark
                           ? "bg-[#181818] border-[#272727] text-neutral-200"
                           : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
-                      }`}>
+                        }`}>
                         {msg.text}
                       </p>
                     </div>
@@ -722,9 +673,8 @@ export default function App() {
                 {/* Chat Form: Lives ONLY in chat pane */}
                 <form
                   onSubmit={handleSendMessage}
-                  className={`room-sidebar-footer p-3 border-t shrink-0 ${
-                    isDark ? "bg-[#111111] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                  }`}
+                  className={`room-sidebar-footer p-3 border-t shrink-0 ${isDark ? "bg-[#111111] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                    }`}
                 >
                   <div className="relative flex items-center">
                     <input
@@ -733,18 +683,16 @@ export default function App() {
                       onChange={(e) => setChatInput(e.target.value)}
                       placeholder="Send message to room..."
                       maxLength={250}
-                      className={`w-full border rounded-xl pl-3.5 pr-11 py-2.5 text-xs focus:outline-none focus:border-[#FF0000] transition ${
-                        isDark
-                          ? "bg-[#181818] border-[#272727] text-white placeholder-neutral-500"
-                          : "bg-white border-[#E5E5E5] text-[#0F0F0F] placeholder-neutral-400"
-                      }`}
+                      className={`w-full border rounded-xl pl-3.5 pr-11 py-2.5 text-xs focus:outline-none focus:border-[#FF0000] transition ${isDark
+                        ? "bg-[#181818] border-[#272727] text-white placeholder-neutral-500"
+                        : "bg-white border-[#E5E5E5] text-[#0F0F0F] placeholder-neutral-400"
+                        }`}
                     />
                     <button
                       type="submit"
                       disabled={!chatInput.trim()}
-                      className={`absolute right-2 p-1.5 rounded-lg transition active:scale-95 shadow-sm disabled:opacity-40 ${
-                        isDark ? "bg-[#F1F1F1] hover:bg-white text-[#0F0F0F]" : "bg-[#0F0F0F] hover:bg-black text-white"
-                      }`}
+                      className={`absolute right-2 p-1.5 rounded-lg transition active:scale-95 shadow-sm disabled:opacity-40 ${isDark ? "bg-[#F1F1F1] hover:bg-white text-[#0F0F0F]" : "bg-[#0F0F0F] hover:bg-black text-white"
+                        }`}
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
@@ -757,46 +705,40 @@ export default function App() {
 
             {/* Pane 2: Audience Pane (Fills vertical height cleanly, NO chat input) */}
             {currentTab === "audience" && (
-              <div className="room-sidebar-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
+              <div className="room-sidebar-pane audience-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
                 <div className="room-sidebar-scroll space-y-2.5 overflow-y-auto min-h-0">
                   <div className="flex items-center justify-between pb-1.5 border-b border-inherit">
                     <span className="text-xs font-bold">Room Members</span>
-                    <span className="text-[11px] opacity-50 font-mono">3 / 50 Active</span>
+                    <span className="text-[11px] opacity-50 font-mono">3 Active</span>
                   </div>
 
                   {/* Host Card */}
-                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
-                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                  }`}>
+                  <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                    }`}>
                     <div className="flex items-center gap-3">
-                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
-                        isDark ? "bg-[#272727] border-[#383838] text-white" : "bg-neutral-200 border-neutral-300 text-black"
-                      }`}>
+                      <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#383838] text-white" : "bg-neutral-200 border-neutral-300 text-black"
+                        }`}>
                         Y
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                        <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                       </div>
                       <div>
-                        <p className="text-xs font-bold">You (Host)</p>
-                        <span className="text-[10px] text-neutral-400 font-mono font-medium tracking-wider">ROOM CREATOR</span>
+                        <p className="text-xs font-bold">You</p>
                       </div>
                     </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${
-                      isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
-                    }`}>
-                      YOU
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                      }`}>
+                      HOST
                     </span>
                   </div>
 
                   {/* Moderator Card */}
-                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
-                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                  }`}>
+                  <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                    }`}>
                     <div className="flex items-center gap-3">
-                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
-                        isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
-                      }`}>
+                      <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                        }`}>
                         M
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                        <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                       </div>
                       <div>
                         <p className="text-xs font-semibold">Maya</p>
@@ -805,9 +747,8 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => updateMemberRole("maya", memberRoles.maya === "MODERATOR" ? "VIEWER" : "MODERATOR")}
-                      className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
-                        isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
-                      }`}
+                      className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
+                        }`}
                     >
                       {memberRoles.maya === "MODERATOR" ? "Demote" : "Promote"}
                     </button>
@@ -815,54 +756,42 @@ export default function App() {
 
                   {/* Participant Card */}
                   {!removedMembers.includes("liam") && (
-                    <div className={`flex items-center justify-between p-3 rounded-2xl border ${
-                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                  }`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
-                        isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                    <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
                       }`}>
-                        L
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                      <div className="flex items-center gap-3">
+                        <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                          }`}>
+                          L
+                          <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold">Liam</p>
+                          <span className="text-[10px] opacity-60 font-mono">{memberRoles.liam}</span>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold">Liam</p>
-                        <span className="text-[10px] opacity-60 font-mono">{memberRoles.liam}</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => updateMemberRole("liam", memberRoles.liam === "MODERATOR" ? "VIEWER" : "MODERATOR")}
+                          className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
+                            }`}
+                        >
+                          {memberRoles.liam === "MODERATOR" ? "Demote" : "Mod"}
+                        </button>
+                        <button
+                          onClick={() => removeMember("liam")}
+                          className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium"
+                        >
+                          Kick
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => updateMemberRole("liam", memberRoles.liam === "MODERATOR" ? "VIEWER" : "MODERATOR")}
-                        className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
-                          isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
-                        }`}
-                      >
-                        {memberRoles.liam === "MODERATOR" ? "Demote" : "Mod"}
-                      </button>
-                      <button
-                        onClick={() => removeMember("liam")}
-                        className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium"
-                      >
-                        Kick
-                      </button>
-                    </div>
                     </div>
                   )}
                 </div>
 
                 {/* Bottom: Compact host permissions */}
-                <div className="room-sidebar-footer pt-1.5 border-t border-inherit shrink-0">
-                  <div className={`p-1.5 rounded-md border ${
-                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F2F2F2] border-[#E5E5E5]"
-                  }`}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#FF0000] block"></span>
-                      <span className="text-[9px] font-bold uppercase tracking-wider">Host Permissions</span>
-                    </div>
-                    <p className="mt-1 text-[9px] opacity-70 leading-[1.2]">
-                      You and designated moderators have playback scrubbing, video changing, and room queue permissions.
-                    </p>
-                  </div>
+                <div className={`room-sidebar-footer room-permissions-footer${isDark ? "" : " is-light"}`}>
+                  <span className="room-permissions-title"><i /><span className="room-permissions-host">Host</span><span>Permissions</span></span>
+                  <p>Playback, video changes, and queue controls are available to hosts and moderators.</p>
                 </div>
               </div>
             )}
@@ -871,9 +800,8 @@ export default function App() {
             {currentTab === "queue" && (
               <div className="room-sidebar-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
                 <div className="room-sidebar-scroll space-y-3 overflow-y-auto min-h-0">
-                  <div className={`p-3.5 rounded-2xl border space-y-2 ${
-                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                  }`}>
+                  <div className={`p-3.5 rounded-2xl border space-y-2 ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                    }`}>
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold font-mono tracking-wider opacity-60 uppercase flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -890,9 +818,8 @@ export default function App() {
                   <div className="flex items-center justify-between pb-1 border-b border-inherit">
                     <span className="text-xs font-bold">Up Next</span>
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none ${
-                        isDark ? "bg-[#272727] text-white" : "bg-[#E5E5E5] text-black"
-                      }`}>
+                      <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none ${isDark ? "bg-[#272727] text-white" : "bg-[#E5E5E5] text-black"
+                        }`}>
                         3
                       </span>
                       <span className="text-[11px] opacity-60 font-medium">tracks queued</span>
@@ -902,17 +829,15 @@ export default function App() {
                   {queueList.map((track) => (
                     <div
                       key={track.id}
-                      className={`p-3 rounded-2xl border flex items-center justify-between ${
-                        isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                      }`}
+                      className={`p-3 rounded-2xl border flex items-center justify-between ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                        }`}
                     >
                       <div className="space-y-0.5">
                         <p className="text-xs font-semibold">{track.title}</p>
                         <span className="text-[10px] opacity-60">{track.req}</span>
                       </div>
-                      <span className={`w-5 h-5 rounded-full border text-[10px] font-mono font-bold flex items-center justify-center shrink-0 ${
-                        isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-700"
-                      }`}>
+                      <span className={`w-5 h-5 rounded-full border text-[10px] font-mono font-bold flex items-center justify-center shrink-0 ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-700"
+                        }`}>
                         {track.id}
                       </span>
                     </div>
@@ -926,13 +851,16 @@ export default function App() {
                   </div>
                   <button
                     onClick={openVideoModal}
-                    className={`w-full py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm ${
-                      isDark
-                        ? "bg-[#181818] hover:bg-[#222222] border-[#272727] text-white"
-                        : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-black"
-                    }`}
+                    className={`w-full py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm ${isDark
+                      ? "bg-[#181818] hover:bg-[#222222] border-[#272727] text-white"
+                      : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-black"
+                      }`}
                   >
-                    <span className="w-4 h-4 rounded-full bg-[#FF0000] text-white flex items-center justify-center text-[11px] font-black">+</span>
+                    <span className="queue-add-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 6v12M6 12h12" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" />
+                      </svg>
+                    </span>
                     <span>Add YouTube Link to Queue</span>
                   </button>
                 </div>
@@ -1010,9 +938,8 @@ export default function App() {
       {/* End Room Modal */}
       {showEndModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className={`max-w-sm w-full border p-6 rounded-3xl space-y-4 text-center shadow-2xl transition-colors ${
-            isDark ? "bg-[#181818] border-[#272727] text-white" : "bg-white border-[#E5E5E5] text-[#0F0F0F]"
-          }`}>
+          <div className={`max-w-sm w-full border p-6 rounded-3xl space-y-4 text-center shadow-2xl transition-colors ${isDark ? "bg-[#181818] border-[#272727] text-white" : "bg-white border-[#E5E5E5] text-[#0F0F0F]"
+            }`}>
             <div className="w-12 h-12 rounded-2xl bg-[#FF0000]/10 text-[#FF0000] mx-auto flex items-center justify-center text-xl font-bold border border-[#FF0000]/30">
               !
             </div>
@@ -1023,9 +950,8 @@ export default function App() {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setShowEndModal(false)}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-semibold transition ${
-                  isDark ? "bg-[#272727] hover:bg-[#333] text-[#F1F1F1]" : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F]"
-                }`}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-semibold transition ${isDark ? "bg-[#272727] hover:bg-[#333] text-[#F1F1F1]" : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F]"
+                  }`}
               >
                 Stay
               </button>
