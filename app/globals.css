@@ -203,6 +203,15 @@
   .room-video-modal-submit { height: 42px; min-height: 42px; }
 }
 
+.room-video-modal-actions.room-join-prompt-actions {
+  display: flex;
+  justify-content: center;
+}
+.room-join-prompt-actions .room-video-modal-submit {
+  min-width: 208px;
+}
+
+
 @media (max-width: 640px) {
   .watch-room-page .room-header-copy-button {
     flex: 0 0 36px !important;

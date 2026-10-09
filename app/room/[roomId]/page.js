@@ -50,6 +50,9 @@ function RoomPage() {
   const router = useRouter();
   const roomId = String(params?.roomId || "").trim().toUpperCase();
   const [identity, setIdentity] = useState(null);
+  const [joinName, setJoinName] = useState("");
+  const [showJoinPrompt, setShowJoinPrompt] = useState(false);
+  const [joinPromptError, setJoinPromptError] = useState("");
   const [selfRole, setSelfRole] = useState("PARTICIPANT");
   const [participants, setParticipants] = useState([]);
   const [connectionState, setConnectionState] = useState("connecting");
@@ -138,14 +141,18 @@ function RoomPage() {
     let socket;
     try {
       const stored = window.sessionStorage.getItem(`watchsync-room-${roomId}`);
-      const roomIdentity = stored ? JSON.parse(stored) : null;
+      const roomIdentity = stored ? JSON.parse(stored) : identity;
       if (!roomIdentity?.name || roomIdentity.roomId !== roomId) {
-        router.replace(`/?room=${encodeURIComponent(roomId)}`);
+        setShowJoinPrompt(true);
         return;
       }
+      if (!identity) {
+        setIdentity(roomIdentity);
+        return () => { cancelled = true; };
+      }
+      setShowJoinPrompt(false);
       if (!roomIdentity.sessionId) roomIdentity.sessionId = window.crypto.randomUUID();
       window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify(roomIdentity));
-      setIdentity(roomIdentity);
       socket = createWatchSyncSocket();
       socketRef.current = socket;
 
@@ -257,7 +264,26 @@ function RoomPage() {
       router.replace(`/?room=${encodeURIComponent(roomId)}`);
       return () => { cancelled = true; socket?.disconnect(); };
     }
-  }, [roomId, router]);
+  }, [roomId, router, identity]);
+
+  const submitJoinPrompt = (event) => {
+    event.preventDefault();
+    const name = joinName.trim().slice(0, 32);
+    if (!name) {
+      setJoinPromptError("Enter your display name to join this room.");
+      return;
+    }
+    const roomIdentity = {
+      roomId,
+      name,
+      mode: "join",
+      sessionId: window.crypto.randomUUID(),
+    };
+    window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify(roomIdentity));
+    setJoinPromptError("");
+    setIdentity(roomIdentity);
+    setShowJoinPrompt(false);
+  };
 
   useEffect(() => {
     if (!identity || !videoId || !youtubeMountRef.current) return;
@@ -422,8 +448,9 @@ function RoomPage() {
   };
 
   const formatTime = (s) => {
-    const mins = Math.floor(s / 60);
-    const secs = String(s % 60).padStart(2, "0");
+    const totalSeconds = Math.max(0, Math.floor(Number(s) || 0));
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = String(totalSeconds % 60).padStart(2, "0");
     return `${mins}:${secs}`;
   };
 
@@ -485,6 +512,41 @@ function RoomPage() {
   return (
     <div className={`watch-room-page ${!isDark ? "theme-light" : "theme-dark"} min-h-screen flex flex-col font-sans transition-colors duration-200 antialiased selection:bg-[#FF0000] selection:text-white ${isDark ? "bg-[#0F0F0F] text-[#F1F1F1]" : "bg-[#F8F8F9] text-[#0F0F0F]"
       }`}>
+      {showJoinPrompt && (
+        <div className={`room-video-modal-backdrop ${isDark ? "room-video-modal-dark" : "room-video-modal-light"}`}>
+          <section className="room-video-modal" role="dialog" aria-modal="true" aria-labelledby="join-room-title">
+            <div className="room-video-modal-edge" />
+            <header>
+              <div>
+                <p>ROOM ACCESS</p>
+                <h2 id="join-room-title">Join room {roomId}</h2>
+              </div>
+            </header>
+            <p className="room-video-modal-message">Choose a display name to join the shared watch room.</p>
+            <form onSubmit={submitJoinPrompt}>
+              <label htmlFor="join-room-name">Your display name</label>
+              <input
+                id="join-room-name"
+                value={joinName}
+                onChange={(event) => { setJoinName(event.target.value); setJoinPromptError(""); }}
+                placeholder="e.g. Alex"
+                maxLength={32}
+                autoComplete="nickname"
+                autoFocus
+              />
+              {joinPromptError && <p className="room-video-modal-message" role="alert">{joinPromptError}</p>}
+              <div className="room-video-modal-actions room-join-prompt-actions">
+                <button type="submit" className="room-video-modal-submit">
+                  Join room
+                  <svg className="room-video-modal-submit-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 12h14M13 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       <style>{`
         @keyframes igReactionFloat {
           0% {
@@ -946,32 +1008,43 @@ function RoomPage() {
               <div className="room-sidebar-pane flex-1 flex flex-col min-h-0 overflow-hidden">
                 <div className="room-sidebar-scroll flex-1 overflow-y-auto p-3.5 space-y-3">
                   {chatMessages.length === 0 && <p className="py-6 text-center text-xs opacity-50">No messages yet. Say hello to the room.</p>}
-                  {chatMessages.map((msg) => (
+                  {chatMessages.map((msg) => {
+                    const isOwnMessage = !msg.isSystem && Boolean(socketRef.current?.id) && msg.id?.startsWith(`${socketRef.current.id}-`);
+                    return (
                     <div key={msg.id} className="flex flex-col text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
-                          {msg.name}
-                        </span>
-                        {msg.role && msg.role !== "PARTICIPANT" && (
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
-                            }`}>
-                            {msg.role === "MODERATOR" ? "MOD" : msg.role}
+                      <div className="flex w-full items-center gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={`truncate text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
+                            {msg.name}
                           </span>
-                        )}
-                        {msg.sentAt && <span className="text-[10px] opacity-40">{new Date(msg.sentAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+                          {msg.role && msg.role !== "PARTICIPANT" && (
+                            <span className={`shrink-0 text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
+                              }`}>
+                              {msg.role === "MODERATOR" ? "MOD" : msg.role}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <p className={`border rounded-2xl px-3.5 py-2 mt-0.5 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
-                        ? isDark
-                          ? "bg-[#181818] border-[#272727] text-neutral-400"
-                          : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
-                        : isDark
-                          ? "bg-[#181818] border-[#272727] text-neutral-200"
-                          : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
-                        }`}>
-                        {msg.text}
-                      </p>
+                      <div className="mt-0.5 flex w-full items-end gap-2">
+                        <p className={`border rounded-2xl px-3.5 py-2 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
+                          ? isDark
+                            ? "bg-[#181818] border-[#272727] text-neutral-400"
+                            : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
+                          : isOwnMessage
+                            ? isDark
+                              ? "bg-[#211817] border-[#3B2926] text-[#F3E7E5]"
+                              : "bg-[#FFF1EF] border-[#F1D2CD] text-[#34211F]"
+                            : isDark
+                              ? "bg-[#181818] border-[#272727] text-neutral-200"
+                              : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
+                          }`}>
+                          {msg.text}
+                        </p>
+                        {msg.sentAt && <span className="mb-1 ml-auto shrink-0 text-right text-[10px] opacity-40">{new Date(msg.sentAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div ref={chatAnchorRef} />
                 </div>
 
