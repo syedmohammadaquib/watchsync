@@ -7,10 +7,10 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(80);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [currentTime, setCurrentTime] = useState(42);
   const duration = 180;
   const [currentTab, setCurrentTab] = useState("chat");
-  const [showVolumePopup, setShowVolumePopup] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
@@ -20,6 +20,8 @@ export default function App() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [reactions, setReactions] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [memberRoles, setMemberRoles] = useState({ maya: "MODERATOR", liam: "VIEWER" });
+  const [removedMembers, setRemovedMembers] = useState([]);
   const [chatMessages, setChatMessages] = useState([
     {
       id: 1,
@@ -48,10 +50,9 @@ export default function App() {
     { id: 3, title: "Cyberpunk 2077 Night City Mix", req: "Requested by You • 3:45" },
   ]);
 
-  const customVolTrackRef = useRef(null);
-  const isDraggingVolRef = useRef(false);
   const chatAnchorRef = useRef(null);
   const toastTimeoutRef = useRef(null);
+  const videoStageRef = useRef(null);
 
   const showToastMsg = (msg) => {
     setToast(msg);
@@ -74,6 +75,17 @@ export default function App() {
     }
   }, [chatMessages, currentTab]);
 
+  useEffect(() => {
+    const handleModalKeyDown = (event) => {
+      if (event.key === "Escape" && showVideoModal) {
+        setShowVideoModal(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleModalKeyDown);
+    return () => window.removeEventListener("keydown", handleModalKeyDown);
+  }, [showVideoModal]);
+
   const applyVolumeLevel = (newVol, notify = false) => {
     const clamped = Math.max(0, Math.min(100, Math.round(newVol)));
     setVolume(clamped);
@@ -83,40 +95,6 @@ export default function App() {
       showToastMsg(mutedState ? "Muted" : `Volume ${clamped}%`);
     }
   };
-
-  const calculateVolumeFromY = (clientY) => {
-    if (!customVolTrackRef.current) return 0;
-    const rect = customVolTrackRef.current.getBoundingClientRect();
-    const relativeY = clientY - rect.top;
-    const pct = 100 - (relativeY / rect.height) * 100;
-    return pct;
-  };
-
-  useEffect(() => {
-    const handleMove = (e) => {
-      if (!isDraggingVolRef.current) return;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      applyVolumeLevel(calculateVolumeFromY(clientY));
-    };
-
-    const handleUp = () => {
-      if (isDraggingVolRef.current) {
-        isDraggingVolRef.current = false;
-      }
-    };
-
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    window.addEventListener("touchmove", handleMove, { passive: true });
-    window.addEventListener("touchend", handleUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("touchend", handleUp);
-    };
-  }, []);
 
   const triggerReaction = (emoji) => {
     const id = Date.now() + Math.random();
@@ -172,10 +150,40 @@ export default function App() {
     showToastMsg("Video synchronized with room!");
   };
 
+  const openVideoModal = () => setShowVideoModal(true);
+
   const formatTime = (s) => {
     const mins = Math.floor(s / 60);
     const secs = String(s % 60).padStart(2, "0");
     return `${mins}:${secs}`;
+  };
+
+  const seekBy = (amount) => {
+    const nextTime = Math.max(0, Math.min(duration, currentTime + amount));
+    setCurrentTime(nextTime);
+    showToastMsg(`${amount > 0 ? "+" : ""}${amount}s`);
+  };
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await videoStageRef.current?.requestFullscreen();
+      }
+    } catch {
+      showToastMsg("Fullscreen is unavailable");
+    }
+  };
+
+  const updateMemberRole = (member, role) => {
+    setMemberRoles((prev) => ({ ...prev, [member]: role }));
+    showToastMsg(`${member === "maya" ? "Maya" : "Liam"} ${role === "MODERATOR" ? "promoted to Moderator" : "demoted"}`);
+  };
+
+  const removeMember = (member) => {
+    setRemovedMembers((prev) => [...prev, member]);
+    showToastMsg(`${member === "maya" ? "Maya" : "Liam"} was removed from the room`);
   };
 
   return (
@@ -314,7 +322,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-3 items-stretch">
               
               {/* Video Player Frame */}
-              <div className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
+              <div ref={videoStageRef} className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
                 isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
               }`}>
                 {/* Embedded YouTube Player */}
@@ -453,68 +461,63 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Utility Buttons: Minimal Vertical Volume, Fullscreen, Change Video */}
+              {/* Playback utility buttons */}
               <div className="playback-actions flex items-center gap-1.5 self-end sm:self-auto shrink-0">
-                
-                {/* Minimal Vertical Volume Pop-up */}
-                <div
-                  className="relative flex items-center justify-center"
-                  onMouseEnter={() => setShowVolumePopup(true)}
-                  onMouseLeave={() => {
-                    if (!isDraggingVolRef.current) setShowVolumePopup(false);
-                  }}
+                <div className="skip-controls flex items-center gap-0">
+                <button
+                  type="button"
+                  onClick={() => seekBy(-10)}
+                  className="playback-icon skip-button"
+                  title="Skip back 10 seconds"
+                  aria-label="Skip back 10 seconds"
                 >
-                  {/* Vertical Popup Capsule */}
-                  <div
-                    className={`absolute bottom-[calc(100%+12px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 px-2.5 py-3 rounded-2xl border backdrop-blur-2xl shadow-2xl transition-all duration-200 z-30 ${
-                      showVolumePopup
-                        ? "opacity-100 translate-y-0 pointer-events-auto"
-                        : "opacity-0 translate-y-2 pointer-events-none"
-                    } ${
-                      isDark ? "bg-[#181818]/95 border-[#272727] text-white" : "bg-white/95 border-[#E5E5E5] text-[#0F0F0F]"
-                    }`}
-                  >
-                    {/* Percentage readout */}
-                    <span className="text-[10px] font-mono font-bold tracking-tight select-none">
-                      {isMuted ? "0%" : `${volume}%`}
-                    </span>
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M6.2 6.2H3.4V3.4M6.2 6.2A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => seekBy(10)}
+                  className="playback-icon skip-button"
+                  title="Skip forward 10 seconds"
+                  aria-label="Skip forward 10 seconds"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M17.8 6.2h2.8V3.4M17.8 6.2A8 8 0 1 0 20 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <text x="12" y="14.8" fill="currentColor" fontFamily="Arial, sans-serif" fontSize="6.2" fontWeight="600" textAnchor="middle">10</text>
+                  </svg>
+                </button>
+                </div>
 
-                    {/* Acoustic Vertical Track */}
-                    <div
-                      ref={customVolTrackRef}
-                      onMouseDown={(e) => {
-                        isDraggingVolRef.current = true;
-                        applyVolumeLevel(calculateVolumeFromY(e.clientY));
-                      }}
-                      onTouchStart={(e) => {
-                        isDraggingVolRef.current = true;
-                        if (e.touches.length > 0) applyVolumeLevel(calculateVolumeFromY(e.touches[0].clientY));
-                      }}
-                      className={`relative w-[5px] h-24 rounded-full cursor-pointer select-none ${
-                        isDark ? "bg-neutral-800" : "bg-neutral-200"
-                      }`}
-                      aria-label="Volume Track"
-                    >
-                      <div
-                        className="absolute bottom-0 left-0 right-0 rounded-full bg-gradient-to-t from-[#FF0000] to-[#FF3B30] shadow-[0_0_8px_rgba(255,0,0,0.45)] pointer-events-none"
-                        style={{ height: `${isMuted ? 0 : volume}%` }}
-                      />
-                      <div
-                        className="absolute left-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-[#FF0000] shadow-[0_0_8px_rgba(255,0,0,0.7)] -translate-x-1/2 translate-y-1/2 pointer-events-none"
-                        style={{ bottom: `${isMuted ? 0 : volume}%` }}
-                      />
-                    </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPlaying((playing) => !playing)}
+                  className="playback-icon"
+                  title={isPlaying ? "Pause" : "Play"}
+                  aria-label={isPlaying ? "Pause playback" : "Resume playback"}
+                >
+                  {isPlaying ? (
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M7.5 5.5h3.25v13H7.5zm5.75 0h3.25v13h-3.25z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M8 5.25v13.5L19 12 8 5.25z" />
+                    </svg>
+                  )}
+                </button>
 
-                    <div
-                      className={`w-2 h-2 rotate-45 border-r border-b absolute -bottom-1 left-1/2 -translate-x-1/2 ${
-                        isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
-                      }`}
-                    />
-                  </div>
-
+                {/* Familiar, inline player volume control */}
+                <div className={`volume-control relative flex items-center${showVolumeSlider ? " volume-slider-open" : ""}`}>
                   {/* Speaker Button with Auto-Mute Icon Detection */}
                   <button
+                    type="button"
                     onClick={() => {
+                      if (window.matchMedia("(hover: none)").matches) {
+                        setShowVolumeSlider((open) => !open);
+                        return;
+                      }
                       if (isMuted) {
                         setIsMuted(false);
                         applyVolumeLevel(volume === 0 ? 80 : volume, true);
@@ -523,11 +526,9 @@ export default function App() {
                         showToastMsg("Muted");
                       }
                     }}
-                    className={`p-2.5 rounded-xl border transition text-xs font-semibold ${
-                      isDark
-                        ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
-                        : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
-                    }`}
+                    aria-label={isMuted ? "Unmute" : "Mute"}
+                    aria-expanded={showVolumeSlider}
+                    className="playback-icon volume-toggle"
                     title={isMuted ? "Unmute" : "Mute"}
                   >
                     {isMuted || volume === 0 ? (
@@ -545,38 +546,52 @@ export default function App() {
                       </svg>
                     )}
                   </button>
+                  <div className="volume-slider-popover" aria-hidden={!showVolumeSlider}>
+                    <span className="volume-level-readout">{isMuted ? 0 : volume}%</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={isMuted ? 0 : volume}
+                      onChange={(event) => applyVolumeLevel(Number(event.target.value))}
+                      aria-label="Volume"
+                      aria-valuetext={`${isMuted ? 0 : volume}%`}
+                      tabIndex={showVolumeSlider ? 0 : -1}
+                      className="volume-inline-slider"
+                      style={{ "--volume-level": `${isMuted ? 0 : volume}%` }}
+                    />
+                  </div>
                 </div>
 
                 {/* Fullscreen Button */}
                 <button
-                  onClick={() => showToastMsg("Fullscreen mode toggled")}
-                  className={`p-2.5 rounded-xl border transition text-xs ${
+                  onClick={toggleFullscreen}
+                  className={`playback-icon ${
                     isDark
                       ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
                       : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
                   }`}
-                  title="Fullscreen"
+                  title="Toggle fullscreen"
+                  aria-label="Toggle fullscreen"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 3H5a2 2 0 00-2 2v3m13-5h3a2 2 0 012 2v3m0 8v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3" />
                   </svg>
                 </button>
 
                 {/* Change Video Action Pill */}
                 <button
-                  onClick={() => setShowVideoModal(true)}
-                  className={`px-3.5 py-2 rounded-xl border text-xs font-semibold tracking-tight transition active:scale-95 flex items-center gap-2 group shadow-sm ${
-                    isDark
-                      ? "bg-[#272727] hover:bg-[#333333] text-[#F1F1F1] border-[#383838]"
-                      : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F] border-[#E5E5E5]"
-                  }`}
+                  onClick={openVideoModal}
+                  className="change-video-trigger"
+                  title="Change the synchronized video"
                 >
-                  <span className="w-4 h-4 rounded-full bg-[#FF0000] text-white flex items-center justify-center shrink-0 shadow-[0_0_8px_rgba(255,0,0,0.5)]">
+                  <span className="change-video-trigger-icon">
                     <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                     </svg>
                   </span>
-                  <span className="tracking-wide">Change Video</span>
+                  <span>Change video</span>
                 </button>
               </div>
             </div>
@@ -785,21 +800,22 @@ export default function App() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold">Maya</p>
-                        <span className="text-[10px] opacity-60 font-mono">MODERATOR</span>
+                        <span className="text-[10px] opacity-60 font-mono">{memberRoles.maya}</span>
                       </div>
                     </div>
                     <button
-                      onClick={() => showToastMsg("Maya was demoted")}
+                      onClick={() => updateMemberRole("maya", memberRoles.maya === "MODERATOR" ? "VIEWER" : "MODERATOR")}
                       className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
                         isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
                       }`}
                     >
-                      Demote
+                      {memberRoles.maya === "MODERATOR" ? "Demote" : "Promote"}
                     </button>
                   </div>
 
                   {/* Participant Card */}
-                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
+                  {!removedMembers.includes("liam") && (
+                    <div className={`flex items-center justify-between p-3 rounded-2xl border ${
                     isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
                   }`}>
                     <div className="flex items-center gap-3">
@@ -811,26 +827,27 @@ export default function App() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold">Liam</p>
-                        <span className="text-[10px] opacity-60 font-mono">VIEWER</span>
+                        <span className="text-[10px] opacity-60 font-mono">{memberRoles.liam}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => showToastMsg("Liam promoted to Moderator")}
+                        onClick={() => updateMemberRole("liam", memberRoles.liam === "MODERATOR" ? "VIEWER" : "MODERATOR")}
                         className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
                           isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
                         }`}
                       >
-                        Mod
+                        {memberRoles.liam === "MODERATOR" ? "Demote" : "Mod"}
                       </button>
                       <button
-                        onClick={() => showToastMsg("Liam was kicked")}
+                        onClick={() => removeMember("liam")}
                         className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium"
                       >
                         Kick
                       </button>
                     </div>
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Bottom: Compact host permissions */}
@@ -908,7 +925,7 @@ export default function App() {
                     <span className="text-[10px] opacity-60 font-medium">Autoplay On</span>
                   </div>
                   <button
-                    onClick={() => setShowVideoModal(true)}
+                    onClick={openVideoModal}
                     className={`w-full py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm ${
                       isDark
                         ? "bg-[#181818] hover:bg-[#222222] border-[#272727] text-white"
@@ -927,53 +944,62 @@ export default function App() {
 
       {/* Change Video Modal */}
       {showVideoModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className={`max-w-md w-full border p-6 rounded-3xl space-y-4 shadow-2xl transition-colors ${
-            isDark ? "bg-[#181818] border-[#272727] text-white" : "bg-white border-[#E5E5E5] text-[#0F0F0F]"
-          }`}>
-            <div className="flex justify-between items-center">
+        <div
+          className={`room-video-modal-backdrop ${isDark ? "room-video-modal-dark" : "room-video-modal-light"}`}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowVideoModal(false);
+          }}
+        >
+          <div
+            className="room-video-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="change-video-title"
+          >
+            <div className="room-video-modal-edge" />
+            <header>
               <div>
-                <h3 className="text-base font-bold tracking-tight">Queue YouTube Video</h3>
-                <p className="text-xs opacity-60 mt-0.5">Stream any public, live, or unlisted YouTube link.</p>
+                <p>ROOM CONTROL</p>
+                <h2 id="change-video-title">Change the video</h2>
               </div>
               <button
+                type="button"
                 onClick={() => setShowVideoModal(false)}
-                className="opacity-60 hover:opacity-100 p-1 rounded-lg"
+                className="room-video-modal-close"
+                aria-label="Close change video dialog"
               >
-                ✕
+                ×
               </button>
-            </div>
+            </header>
 
-            <form onSubmit={handleLoadVideo} className="space-y-4">
+            <p className="room-video-modal-message">
+              Paste a YouTube link to replace the current synchronized video for everyone in the room.
+            </p>
+
+            <form onSubmit={handleLoadVideo}>
+              <label htmlFor="room-video-url">YouTube URL</label>
               <input
-                type="text"
+                id="room-video-url"
+                type="url"
                 value={videoUrl}
                 onChange={(e) => setVideoUrl(e.target.value)}
-                placeholder="Paste URL (e.g. youtube.com/watch?v=...)"
+                placeholder="youtube.com/watch?v=..."
                 autoFocus
-                className={`w-full border px-3.5 py-2.5 rounded-xl text-xs focus:outline-none focus:border-[#FF0000] transition ${
-                  isDark
-                    ? "bg-[#0F0F0F] border-[#272727] text-white placeholder-neutral-500"
-                    : "bg-[#F8F8F9] border-[#E5E5E5] text-black placeholder-neutral-400"
-                }`}
               />
-              <div className="flex justify-end gap-2">
+              <div className="room-video-modal-actions">
                 <button
                   type="button"
                   onClick={() => setShowVideoModal(false)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
-                    isDark ? "bg-[#272727] hover:bg-[#333] text-[#F1F1F1]" : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F]"
-                  }`}
+                  className="room-video-modal-cancel"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-md ${
-                    isDark ? "bg-[#F1F1F1] hover:bg-white text-[#0F0F0F]" : "bg-[#0F0F0F] hover:bg-black text-white"
-                  }`}
+                  className="room-video-modal-submit"
                 >
-                  Load & Sync →
+                  Load & sync <span aria-hidden="true">→</span>
                 </button>
               </div>
             </form>
