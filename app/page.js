@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ThemeToggle, { useTheme } from "@/components/theme-toggle";
+import { createWatchSyncSocket } from "@/lib/socket";
 
 const videoData = [
     { title: "Lofi Hip Hop Radio - Beats to Relax / Study", tag: "LIVE", duration: "24/7", views: "28k watching", img: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=480&q=80" },
@@ -16,7 +17,7 @@ const videoData = [
 ];
 
 function makeRoomCode() {
-    return Math.random().toString(36).slice(2, 8).toUpperCase();
+    return crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
 }
 
 function PosterCard({ item }) {
@@ -47,9 +48,19 @@ export default function Home() {
     const [readyRoom, setReadyRoom] = useState(null);
     const [linkCopied, setLinkCopied] = useState(false);
     const [codeCopied, setCodeCopied] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    function handleSubmit(event) {
+    useEffect(() => {
+        const requestedRoom = new URLSearchParams(window.location.search).get("room");
+        if (requestedRoom) {
+            setMode("join");
+            setRoomCode(requestedRoom.trim().toUpperCase());
+        }
+    }, []);
+
+    async function handleSubmit(event) {
         event.preventDefault();
+        if (isSubmitting) return;
         const cleanName = name.trim();
         const cleanCode = roomCode.trim().toUpperCase();
         if (!cleanName) {
@@ -61,11 +72,38 @@ export default function Home() {
             return;
         }
         const code = mode === "create" ? makeRoomCode() : cleanCode;
-        const sessionId = mode === "create" ? crypto.randomUUID() : undefined;
-        window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
-        setLinkCopied(false);
-        setCodeCopied(false);
-        setReadyRoom({ code, name: cleanName });
+        const sessionId = crypto.randomUUID();
+        setIsSubmitting(true);
+        setError("");
+        const socket = createWatchSyncSocket();
+        try {
+            await new Promise((resolve, reject) => {
+                socket.once("connect", resolve);
+                socket.once("connect_error", reject);
+                socket.connect();
+            });
+            const response = await new Promise((resolve, reject) => {
+                socket.timeout(12000).emit(
+                    mode === "create" ? "create_room" : "check_room",
+                    mode === "create" ? { roomId: code, sessionId } : { roomId: code },
+                    (timeoutError, result) => {
+                        if (timeoutError) reject(new Error("The room service did not respond. Please try again."));
+                        else if (!result?.ok) reject(new Error(result?.message || "Unable to prepare this room."));
+                        else resolve(result);
+                    },
+                );
+            });
+            if (!response?.ok) throw new Error("Unable to prepare this room.");
+            window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
+            setLinkCopied(false);
+            setCodeCopied(false);
+            setReadyRoom({ code, name: cleanName });
+        } catch (requestError) {
+            setError(requestError.message || "The realtime service is unavailable. Please try again shortly.");
+        } finally {
+            socket.disconnect();
+            setIsSubmitting(false);
+        }
     }
 
     function enterRoom() {
@@ -112,7 +150,7 @@ export default function Home() {
                 <nav className="exact-topbar" aria-label="Primary navigation">
                     <div className="exact-brand"><span />watch<span>sync</span></div>
                     <div className="exact-tools">
-                        <div className="exact-live-counter"><i />14,290 synchronized watchers</div>
+                        <div className="exact-live-counter"><i />Synchronized YouTube playback</div>
                         <ThemeToggle defaultTheme={theme} />
                     </div>
                 </nav>
@@ -138,7 +176,7 @@ export default function Home() {
                             {mode === "join" && <label>Room Code<input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="ENTER ROOM CODE" maxLength={8} autoCapitalize="characters" /></label>}
                             <label>Your Display Name<input value={name} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder="e.g. Alex, Sarah..." maxLength={32} autoFocus /></label>
                             {error && <p className="exact-error" role="alert">ⓘ <span>{error}</span></p>}
-                            <button className="exact-primary-action" type="submit">{mode === "create" ? "Create Watch Room" : "Enter Watch Room"} <span>→</span></button>
+                            <button className="exact-primary-action" type="submit" disabled={isSubmitting}>{isSubmitting ? "Connecting…" : mode === "create" ? "Create Watch Room" : "Enter Watch Room"} <span>→</span></button>
                         </form>
                         <div className="exact-privacy"><span>🔒 Private &amp; encrypted link</span><span>No signup needed</span></div>
                     </section>

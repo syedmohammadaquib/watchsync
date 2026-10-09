@@ -1,55 +1,93 @@
 "use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { createWatchSyncSocket } from "@/lib/socket";
 
-export default function App() {
+function extractYouTubeVideoId(value) {
+  const input = value.trim();
+  if (/^[\w-]{11}$/.test(input)) return input;
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `https://${input}`);
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    let id = "";
+    if (hostname === "youtu.be") id = url.pathname.split("/").filter(Boolean)[0] || "";
+    else if (["youtube.com", "m.youtube.com", "music.youtube.com"].includes(hostname)) {
+      id = url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/)?.[1] || "";
+    }
+    return /^[\w-]{11}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadYouTubeIframeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (window.watchSyncYouTubeApiPromise) return window.watchSyncYouTubeApiPromise;
+  window.watchSyncYouTubeApiPromise = new Promise((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      resolve(window.YT);
+    };
+    let script = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+    if (!script) {
+      script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      script.onerror = () => reject(new Error("The YouTube player could not be loaded."));
+      document.head.appendChild(script);
+    }
+  }).catch((error) => {
+    window.watchSyncYouTubeApiPromise = null;
+    throw error;
+  });
+  return window.watchSyncYouTubeApiPromise;
+}
+
+function RoomPage() {
+  const params = useParams();
+  const router = useRouter();
+  const roomId = String(params?.roomId || "").trim().toUpperCase();
+  const [identity, setIdentity] = useState(null);
+  const [selfRole, setSelfRole] = useState("PARTICIPANT");
+  const [participants, setParticipants] = useState([]);
+  const [connectionState, setConnectionState] = useState("connecting");
+  const currentUserRole = selfRole;
+  const canStartVideo = currentUserRole === "HOST" || currentUserRole === "MODERATOR";
   const [isDark, setIsDark] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(80);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
-  const [currentTime, setCurrentTime] = useState(42);
-  const duration = 180;
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [currentTab, setCurrentTab] = useState("chat");
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
-  const [videoUrl, setVideoUrl] = useState("https://www.youtube.com/watch?v=jfKfPfyJRdk");
-  const [videoId, setVideoId] = useState("jfKfPfyJRdk");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoId, setVideoId] = useState(null);
+  const [hasHostStartedVideo, setHasHostStartedVideo] = useState(false);
+  const [videoModalMode, setVideoModalMode] = useState("replace");
   const [toast, setToast] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
   const [reactions, setReactions] = useState([]);
   const [chatInput, setChatInput] = useState("");
-  const [memberRoles, setMemberRoles] = useState({ maya: "MODERATOR", liam: "VIEWER" });
-  const [removedMembers, setRemovedMembers] = useState([]);
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      name: "System",
-      text: "Welcome to WatchSync! Playback is locked in exact real-time sync with all peers.",
-      isSystem: true,
-    },
-    {
-      id: 2,
-      name: "Maya",
-      badge: "MOD",
-      text: "Sound and 4K quality look crisp 🔥 Everyone ready for the drop?",
-      time: "2m ago",
-    },
-    {
-      id: 3,
-      name: "Liam",
-      text: "Audio sync is zero-delay. Loving this track! 🎶",
-      time: "Just now",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [queueList, setQueueList] = useState([]);
 
-  const [queueList] = useState([
-    { id: 1, title: "Interstellar Live Orchestra", req: "Requested by Liam • 4:12" },
-    { id: 2, title: "Lofi Hip Hop Radio 24/7", req: "Requested by Maya • Live" },
-    { id: 3, title: "Cyberpunk 2077 Night City Mix", req: "Requested by You • 3:45" },
-  ]);
-
+  const socketRef = useRef(null);
+  const youtubeMountRef = useRef(null);
+  const youtubePlayerRef = useRef(null);
+  const initialRoomStateRef = useRef(null);
+  const queueListRef = useRef(queueList);
+  const userRoleRef = useRef(currentUserRole);
+  const volumeRef = useRef(volume);
+  const toastCallbackRef = useRef(null);
+  queueListRef.current = queueList;
+  userRoleRef.current = currentUserRole;
+  volumeRef.current = volume;
   const chatAnchorRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const videoStageRef = useRef(null);
@@ -67,18 +105,23 @@ export default function App() {
       const contentRect = content.getBoundingClientRect();
       const horizontalInset = 14;
       const verticalInset = 8;
+      const contentRects = Object.values(roomTabContentRefs.current)
+        .filter(Boolean)
+        .map((node) => node.getBoundingClientRect());
+      const capsuleWidth = Math.max(...contentRects.map((rect) => rect.width)) + horizontalInset * 2;
+      const capsuleHeight = Math.max(...contentRects.map((rect) => rect.height)) + verticalInset * 2;
       setTabCapsuleStyle({
-        left: contentRect.left - tabsRect.left - horizontalInset,
+        left: contentRect.left - tabsRect.left + contentRect.width / 2 - capsuleWidth / 2,
         top: contentRect.top - tabsRect.top - verticalInset,
-        width: contentRect.width + horizontalInset * 2,
-        height: contentRect.height + verticalInset * 2,
+        width: capsuleWidth,
+        height: capsuleHeight,
       });
     };
 
     updateCapsulePosition();
     const observer = new ResizeObserver(updateCapsulePosition);
     observer.observe(tabs);
-    observer.observe(content);
+    Object.values(roomTabContentRefs.current).filter(Boolean).forEach((node) => observer.observe(node));
     return () => observer.disconnect();
   }, [currentTab]);
 
@@ -87,15 +130,204 @@ export default function App() {
     clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => setToast(""), 2500);
   };
+  toastCallbackRef.current = showToastMsg;
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (isPlaying) {
-        setCurrentTime((prev) => (prev < duration ? prev + 1 : prev));
+    if (!roomId) return;
+    let cancelled = false;
+    let socket;
+    try {
+      const stored = window.sessionStorage.getItem(`watchsync-room-${roomId}`);
+      const roomIdentity = stored ? JSON.parse(stored) : null;
+      if (!roomIdentity?.name || roomIdentity.roomId !== roomId) {
+        router.replace(`/?room=${encodeURIComponent(roomId)}`);
+        return;
       }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [isPlaying, duration]);
+      if (!roomIdentity.sessionId) roomIdentity.sessionId = window.crypto.randomUUID();
+      window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify(roomIdentity));
+      setIdentity(roomIdentity);
+      socket = createWatchSyncSocket();
+      socketRef.current = socket;
+
+      const joinRoom = () => socket.emit("join_room", {
+        roomId,
+        username: roomIdentity.name,
+        mode: roomIdentity.mode,
+        sessionId: roomIdentity.sessionId,
+      });
+      const onConnect = () => {
+        if (cancelled) return;
+        setConnectionState("connected");
+        joinRoom();
+      };
+      const onDisconnect = () => setConnectionState("reconnecting");
+      const onConnectionError = () => {
+        setConnectionState("offline");
+        toastCallbackRef.current?.("The realtime service is unavailable. Room controls and chat need a connection.");
+      };
+      const onSyncState = (state) => {
+        initialRoomStateRef.current = state;
+        setSelfRole(state.selfRole || "PARTICIPANT");
+        setParticipants(state.participants || []);
+        setChatMessages(state.chat || []);
+        setQueueList(state.queue || []);
+        setVideoId(state.videoId || null);
+        setHasHostStartedVideo(Boolean(state.videoId));
+        setCurrentTime(Number(state.currentTime) || 0);
+        setIsPlaying(state.playState === "playing");
+      };
+      const onParticipants = ({ participants: nextParticipants = [] } = {}) => setParticipants(nextParticipants);
+      const onMessage = (message) => setChatMessages((current) => current.some((entry) => entry.id === message.id) ? current : [...current, message]);
+      const onRoleAssigned = ({ userId, role, participants: nextParticipants = [] } = {}) => {
+        setParticipants(nextParticipants);
+        if (socket.id === userId) setSelfRole(role);
+      };
+      const onVideoUpdated = ({ videoId: nextVideoId, currentTime: nextTime = 0, playState } = {}) => {
+        initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), videoId: nextVideoId, currentTime: nextTime, playState: playState || "paused" };
+        setVideoId(nextVideoId || null);
+        setHasHostStartedVideo(Boolean(nextVideoId));
+        setCurrentTime(Number(nextTime) || 0);
+        if (playState) setIsPlaying(playState === "playing");
+      };
+      const onPlaybackUpdated = ({ action, currentTime: nextTime } = {}) => {
+        const player = youtubePlayerRef.current;
+        const seekTo = Number(nextTime) || 0;
+        initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: seekTo, playState: action === "play" ? "playing" : action === "pause" ? "paused" : initialRoomStateRef.current?.playState };
+        setCurrentTime(seekTo);
+        if (action === "play") {
+          setIsPlaying(true);
+          player?.seekTo(seekTo, true);
+          player?.playVideo();
+        } else if (action === "pause") {
+          setIsPlaying(false);
+          player?.seekTo(seekTo, true);
+          player?.pauseVideo();
+        } else if (action === "seek") {
+          player?.seekTo(seekTo, true);
+        }
+      };
+      const onQueueUpdated = ({ queue = [] } = {}) => setQueueList(queue);
+      const onReaction = ({ id, emoji, name } = {}) => {
+        const reactionId = id || `${Date.now()}-${Math.random()}`;
+        setReactions((current) => [...current, { id: reactionId, emoji, name, offsetRight: 14 + Math.floor(Math.random() * 38) }]);
+        window.setTimeout(() => setReactions((current) => current.filter((reaction) => reaction.id !== reactionId)), 1800);
+      };
+      const onRemoved = () => {
+        window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
+        socket.disconnect();
+        router.replace(`/?room=${encodeURIComponent(roomId)}`);
+      };
+      const onEnded = () => {
+        window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
+        socket.disconnect();
+        router.replace("/");
+      };
+      const onRoomError = (error) => toastCallbackRef.current?.(error?.message || "A room action could not be completed.");
+
+      socket.on("connect", onConnect);
+      socket.on("disconnect", onDisconnect);
+      socket.on("connect_error", onConnectionError);
+      socket.on("sync_state", onSyncState);
+      socket.on("room_not_found", () => {
+        window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
+        router.replace(`/?room=${encodeURIComponent(roomId)}`);
+      });
+      socket.on("user_joined", onParticipants);
+      socket.on("user_left", onParticipants);
+      socket.on("new_message", onMessage);
+      socket.on("role_assigned", onRoleAssigned);
+      socket.on("video_updated", onVideoUpdated);
+      socket.on("playback_updated", onPlaybackUpdated);
+      socket.on("queue_updated", onQueueUpdated);
+      socket.on("room_reaction", onReaction);
+      socket.on("participant_removed", onRemoved);
+      socket.on("room_ended", onEnded);
+      socket.on("room_error", onRoomError);
+      socket.on("error", onRoomError);
+      socket.connect();
+
+      return () => {
+        cancelled = true;
+        socket.emit("leave_room");
+        socket.disconnect();
+        if (socketRef.current === socket) socketRef.current = null;
+      };
+    } catch {
+      setConnectionState("offline");
+      router.replace(`/?room=${encodeURIComponent(roomId)}`);
+      return () => { cancelled = true; socket?.disconnect(); };
+    }
+  }, [roomId, router]);
+
+  useEffect(() => {
+    if (!identity || !videoId || !youtubeMountRef.current) return;
+    let disposed = false;
+    loadYouTubeIframeApi().then((YT) => {
+      if (disposed || !youtubeMountRef.current) return;
+      if (youtubePlayerRef.current) return;
+      youtubePlayerRef.current = new YT.Player(youtubeMountRef.current, {
+        width: "100%",
+        height: "100%",
+        videoId: videoId || undefined,
+        playerVars: { controls: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, enablejsapi: 1 },
+        events: {
+          onReady: (event) => {
+            const roomState = initialRoomStateRef.current;
+            event.target.setVolume(volumeRef.current);
+            if (roomState?.videoId) event.target.seekTo(Number(roomState.currentTime) || 0, true);
+            if (roomState?.playState === "playing") event.target.playVideo();
+            setDuration(event.target.getDuration() || 0);
+          },
+          onStateChange: (event) => {
+            const playerState = YT.PlayerState;
+            if (event.data === playerState.PLAYING) setIsPlaying(true);
+            if (event.data === playerState.PAUSED || event.data === playerState.ENDED) setIsPlaying(false);
+            setDuration(event.target.getDuration() || 0);
+            if (event.data === playerState.ENDED && userRoleRef.current === "HOST" && queueListRef.current[0]) {
+              socketRef.current?.emit("queue_play", { itemId: queueListRef.current[0].id });
+            }
+          },
+          onError: () => {
+            if (initialRoomStateRef.current?.videoId) toastCallbackRef.current?.("This YouTube video cannot be played here.");
+          },
+        },
+      });
+    }).catch((error) => toastCallbackRef.current?.(error.message));
+    return () => { disposed = true; };
+  }, [identity, videoId]);
+
+  useEffect(() => {
+    const player = youtubePlayerRef.current;
+    if (!player) return;
+    player.setVolume(volume);
+    if (isMuted) player.mute();
+    else player.unMute();
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    const player = youtubePlayerRef.current;
+    if (!player || !videoId) return;
+    const roomState = initialRoomStateRef.current || {};
+    player.loadVideoById({ videoId, startSeconds: Number(roomState.currentTime) || 0 });
+    if (roomState.playState !== "playing") player.pauseVideo();
+  }, [videoId]);
+
+  useEffect(() => {
+    if (!isPlaying || !youtubePlayerRef.current) return;
+    const timer = window.setInterval(() => {
+      const player = youtubePlayerRef.current;
+      if (player?.getCurrentTime) {
+        setCurrentTime(Math.floor(player.getCurrentTime()));
+        setDuration(player.getDuration() || 0);
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, videoId]);
+
+  useEffect(() => () => {
+    youtubePlayerRef.current?.destroy?.();
+    youtubePlayerRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (currentTab === "chat") {
@@ -119,18 +351,17 @@ export default function App() {
     setVolume(clamped);
     const mutedState = clamped === 0;
     setIsMuted(mutedState);
+    youtubePlayerRef.current?.setVolume(clamped);
+    if (mutedState) youtubePlayerRef.current?.mute();
+    else youtubePlayerRef.current?.unMute();
     if (notify) {
       showToastMsg(mutedState ? "Muted" : `Volume ${clamped}%`);
     }
   };
 
   const triggerReaction = (emoji) => {
-    const id = Date.now() + Math.random();
-    const offsetRight = 14 + Math.floor(Math.random() * 38);
-    setReactions((prev) => [...prev, { id, emoji, offsetRight }]);
-    setTimeout(() => {
-      setReactions((prev) => prev.filter((r) => r.id !== id));
-    }, 1700);
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect to send a reaction.");
+    socketRef.current.emit("send_reaction", { emoji });
   };
 
   useEffect(() => {
@@ -145,40 +376,50 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(window.location.href);
-    setCopiedLink(true);
-    showToastMsg("Link copied to clipboard!");
-    setTimeout(() => setCopiedLink(false), 2000);
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      showToastMsg("Link copied to clipboard!");
+      window.setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      showToastMsg("Unable to copy the link. Copy it from the address bar.");
+    }
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    setChatMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        name: "You",
-        badge: "HOST",
-        text: chatInput.trim(),
-        time: "Just now",
-      },
-    ]);
+    const text = chatInput.trim();
+    if (!text) return;
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before sending a message.");
+    socketRef.current.emit("send_message", { text });
     setChatInput("");
   };
 
   const handleLoadVideo = (e) => {
     e.preventDefault();
-    const match = videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|shorts\/|embed\/))([\w-]{11})/i);
-    const vId = match ? match[1] : (videoUrl.trim().length === 11 ? videoUrl.trim() : "jfKfPfyJRdk");
-    setVideoId(vId);
+    const nextVideoId = extractYouTubeVideoId(videoUrl);
+    if (!nextVideoId) {
+      showToastMsg("Enter a valid YouTube video link.");
+      return;
+    }
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before changing the video.");
+    if (videoModalMode === "queue") {
+      socketRef.current.emit("queue_add", { videoId: nextVideoId });
+      showToastMsg("Added to the room queue.");
+    } else {
+      socketRef.current.emit("set_video", { videoId: nextVideoId });
+      showToastMsg("Changing the shared video…");
+    }
     setShowVideoModal(false);
-    setCurrentTime(0);
-    showToastMsg("Video synchronized with room!");
+    setVideoUrl("");
   };
 
-  const openVideoModal = () => setShowVideoModal(true);
+  const openVideoModal = (mode = "replace") => {
+    setVideoModalMode(mode);
+    setVideoUrl("");
+    setShowVideoModal(true);
+  };
 
   const formatTime = (s) => {
     const mins = Math.floor(s / 60);
@@ -187,9 +428,36 @@ export default function App() {
   };
 
   const seekBy = (amount) => {
-    const nextTime = Math.max(0, Math.min(duration, currentTime + amount));
+    if (!canStartVideo) return showToastMsg("Only the host or a moderator can control playback.");
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before seeking the video.");
+    const nextTime = Math.max(0, Math.min(duration || 86400, (youtubePlayerRef.current?.getCurrentTime?.() ?? currentTime) + amount));
     setCurrentTime(nextTime);
-    showToastMsg(`${amount > 0 ? "+" : ""}${amount}s`);
+    initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime };
+    youtubePlayerRef.current?.seekTo(nextTime, true);
+    socketRef.current?.emit("playback_action", { action: "seek", currentTime: nextTime });
+  };
+
+  const togglePlayback = () => {
+    if (!canStartVideo) return showToastMsg("Only the host or a moderator can control playback.");
+    if (!videoId) return showToastMsg("Add a video before starting playback.");
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before controlling playback.");
+    const player = youtubePlayerRef.current;
+    const nextTime = player?.getCurrentTime?.() ?? currentTime;
+    const action = isPlaying ? "pause" : "play";
+    setIsPlaying(action === "play");
+    initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime, playState: action === "play" ? "playing" : "paused" };
+    socketRef.current?.emit("playback_action", { action, currentTime: nextTime });
+    if (action === "play") player?.playVideo();
+    else player?.pauseVideo();
+  };
+
+  const seekTo = (time) => {
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before seeking the video.");
+    const nextTime = Math.max(0, Math.min(duration || 86400, Number(time) || 0));
+    setCurrentTime(nextTime);
+    initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime };
+    youtubePlayerRef.current?.seekTo(nextTime, true);
+    socketRef.current?.emit("playback_action", { action: "seek", currentTime: nextTime });
   };
 
   const toggleFullscreen = async () => {
@@ -204,14 +472,14 @@ export default function App() {
     }
   };
 
-  const updateMemberRole = (member, role) => {
-    setMemberRoles((prev) => ({ ...prev, [member]: role }));
-    showToastMsg(`${member === "maya" ? "Maya" : "Liam"} ${role === "MODERATOR" ? "promoted to Moderator" : "demoted"}`);
+  const updateMemberRole = (userId, role) => {
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before changing room roles.");
+    socketRef.current?.emit("assign_role", { userId, role: role === "MODERATOR" ? "MODERATOR" : "PARTICIPANT" });
   };
 
-  const removeMember = (member) => {
-    setRemovedMembers((prev) => [...prev, member]);
-    showToastMsg(`${member === "maya" ? "Maya" : "Liam"} was removed from the room`);
+  const removeMember = (userId) => {
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before removing a member.");
+    socketRef.current?.emit("remove_participant", { userId });
   };
 
   return (
@@ -255,25 +523,26 @@ export default function App() {
           </div>
 
           {/* Room Pill */}
-          <div
+          <button
+            type="button"
             onClick={() => {
-              navigator.clipboard?.writeText("sync-8842");
-              showToastMsg("Room code 'sync-8842' copied!");
+              navigator.clipboard?.writeText(roomId)?.then(() => showToastMsg("Room code copied!"));
             }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border cursor-pointer transition select-none ${isDark ? "bg-[#181818] border-[#272727] hover:border-neutral-600" : "bg-[#F2F2F2] border-[#E5E5E5] hover:border-neutral-400"
               }`}
             title="Click to copy Room Code"
+            aria-label={`Copy room code ${roomId}`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-[#FF0000] animate-pulse"></span>
             <span className="text-neutral-500 text-[11px] font-medium uppercase tracking-wider">Room</span>
-            <span className="font-mono text-[11px] font-semibold">sync-8842</span>
-          </div>
+            <span className="font-mono text-[11px] font-semibold">{roomId}</span>
+          </button>
 
-          {/* Synchronized Watchers Badge */}
+          {/* Synchronized playback feature */}
           <div className={`hidden lg:flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${isDark ? "bg-[#181818] border-[#272727] text-neutral-300" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700"
             }`}>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>14,290 synchronized watchers</span>
+            <span className={`w-2 h-2 rounded-full ${connectionState === "connected" ? "bg-emerald-500" : "bg-amber-500"}`}></span>
+            <span>{connectionState === "connected" ? "Playback stays in sync" : connectionState === "reconnecting" ? "Reconnecting…" : "Connecting…"}</span>
           </div>
         </div>
 
@@ -285,8 +554,7 @@ export default function App() {
               setIsDark(!isDark);
               showToastMsg(!isDark ? "Dark mode activated" : "Light mode activated");
             }}
-            className={`p-2 rounded-xl border transition ${isDark ? "bg-[#181818] border-[#272727] text-neutral-300 hover:text-white" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700 hover:text-black"
-              }`}
+            className="room-header-icon-button"
             title="Toggle theme"
           >
             {isDark ? (
@@ -304,32 +572,37 @@ export default function App() {
           {/* Copy Link Button */}
           <button
             onClick={handleCopyLink}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition shadow-sm active:scale-95 ${copiedLink
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
-              : isDark
-                ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
-                : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
-              }`}
+            aria-label={copiedLink ? "Link copied" : "Copy room link"}
+            title={copiedLink ? "Link copied" : "Copy room link"}
+            className={`room-header-copy-button${copiedLink ? " is-copied" : ""}`}
           >
             {copiedLink ? (
-              <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+              <span className="room-copy-icon">
+                <svg style={{ color: "#10b981", flex: "0 0 18px", width: 18, height: 18, display: "block" }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </span>
             ) : (
-              <svg className="w-3.5 h-3.5 text-[#FF0000]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
+              <span className="room-copy-icon">
+                <svg style={{ color: "#f04438", flex: "0 0 18px", width: 18, height: 18, display: "block" }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </span>
             )}
             <span>{copiedLink ? "Copied!" : "Copy Link"}</span>
           </button>
 
           {/* End Room Button */}
-          <button
-            onClick={() => setShowEndModal(true)}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#FF0000]/10 hover:bg-[#FF0000]/20 text-[#FF0000] border border-[#FF0000]/30 transition active:scale-95"
-          >
-            End Room
-          </button>
+          {currentUserRole === "HOST" ? (
+            <button type="button" onClick={() => setShowEndModal(true)} className="room-header-end-button">End Room</button>
+          ) : (
+            <button type="button" onClick={() => {
+              window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
+              socketRef.current?.emit("leave_room");
+              socketRef.current?.disconnect();
+              router.replace("/");
+            }} className="room-header-end-button">Leave Room</button>
+          )}
         </div>
       </header>
 
@@ -347,20 +620,44 @@ export default function App() {
               <div ref={videoStageRef} className={`room-video-stage relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
                 }`}>
                 {/* Embedded YouTube Player */}
-                <iframe
-                  className="w-full h-full pointer-events-none"
-                  src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&controls=0&modestbranding=1&rel=0&playsinline=1&autoplay=1&cc_load_policy=0`}
-                  title="WatchSync Theater"
-                  frameBorder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                />
+                <div ref={youtubeMountRef} className="h-full w-full" aria-label="Shared YouTube video player" />
+
+                {!hasHostStartedVideo && (
+                  <div className="room-video-waiting-overlay" aria-live="polite">
+                    <div className="room-video-waiting-spotlight" />
+                    <div className="room-video-waiting-card">
+                      <span className="room-video-waiting-status">
+                        <span className="room-video-waiting-status-dot" />
+                        Room Ready
+                      </span>
+                      <div className="room-video-waiting-brand" aria-label="YouTube">
+                        <svg viewBox="0 0 48 34" aria-hidden="true">
+                          <path d="M47.1 5.3c-.6-2.1-2.2-3.8-4.3-4.3C38.9 0 24 0 24 0S9.1 0 5.3 1C3.2 1.5 1.6 3.2 1 5.3 0 9.1 0 17 0 17s0 7.9 1 11.7c.6 2.1 2.2 3.8 4.3 4.3 3.8 1 18.7 1 18.7 1s14.9 0 18.7-1c2.1-.6 3.8-2.2 4.3-4.3 1-3.8 1-11.7 1-11.7s0-7.9-1-11.7z" />
+                          <path d="M19.2 24.3V9.7l12.8 7.3-12.8 7.3z" fill="#fff" />
+                        </svg>
+                      </div>
+                      <h2 className="room-video-waiting-title">Start the <br />watch party</h2>
+                      <p className="room-video-waiting-copy">
+                        No borders. No limits. Choose a video and experience seamless synchronization.
+                      </p>
+                      {canStartVideo && (
+                        <button type="button" className="room-video-start-button" onClick={openVideoModal} aria-label="Add a video">
+                          <span>Add a video</span>
+                          <svg className="room-video-start-arrow" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none">
+                            <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Top-Left Host Control Badge */}
-                <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
+                {hasHostStartedVideo && <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
                   }`}>
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span>You have host control</span>
-                </div>
+                </div>}
 
                 {/* Floating reactions remain emoji-based; the trigger below uses a regular icon. */}
                 <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
@@ -443,15 +740,18 @@ export default function App() {
                     }`}>
                     <div
                       className="h-full bg-[#FF0000] transition-all"
-                      style={{ width: `${(currentTime / duration) * 100}%` }}
+                      style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
                     />
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max={duration}
+                    max={Math.max(duration, 1)}
                     value={currentTime}
                     onChange={(e) => setCurrentTime(Number(e.target.value))}
+                    onPointerUp={(e) => seekTo(e.currentTarget.value)}
+                    onKeyUp={(e) => seekTo(e.currentTarget.value)}
+                    disabled={!videoId || !canStartVideo}
                     className="seek-slider relative z-10 w-full h-1.5 bg-transparent appearance-none cursor-pointer focus:outline-none accent-[#FF0000]"
                   />
                 </div>
@@ -465,7 +765,8 @@ export default function App() {
               <div className="playback-actions flex items-center gap-1.5 self-end sm:self-auto shrink-0">
                 <button
                   type="button"
-                  onClick={() => setIsPlaying((playing) => !playing)}
+                  onClick={togglePlayback}
+                  disabled={!videoId || !canStartVideo}
                   className="playback-icon"
                   title={isPlaying ? "Pause" : "Play"}
                   aria-label={isPlaying ? "Pause playback" : "Resume playback"}
@@ -485,6 +786,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => seekBy(-10)}
+                    disabled={!videoId || !canStartVideo}
                     className="playback-icon skip-button"
                     title="Skip back 10 seconds"
                     aria-label="Skip back 10 seconds"
@@ -497,6 +799,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => seekBy(10)}
+                    disabled={!videoId || !canStartVideo}
                     className="playback-icon skip-button"
                     title="Skip forward 10 seconds"
                     aria-label="Skip forward 10 seconds"
@@ -580,7 +883,8 @@ export default function App() {
                 </button>
 
                 {/* Change Video Action Pill */}
-                <button
+                {canStartVideo && <button
+                  type="button"
                   onClick={openVideoModal}
                   className="change-video-trigger"
                   title="Change the synchronized video"
@@ -591,7 +895,7 @@ export default function App() {
                     </svg>
                   </span>
                   <span>Change video</span>
-                </button>
+                </button>}
               </div>
             </div>
           </section>
@@ -641,19 +945,20 @@ export default function App() {
             {currentTab === "chat" && (
               <div className="room-sidebar-pane flex-1 flex flex-col min-h-0 overflow-hidden">
                 <div className="room-sidebar-scroll flex-1 overflow-y-auto p-3.5 space-y-3">
+                  {chatMessages.length === 0 && <p className="py-6 text-center text-xs opacity-50">No messages yet. Say hello to the room.</p>}
                   {chatMessages.map((msg) => (
                     <div key={msg.id} className="flex flex-col text-sm">
                       <div className="flex items-center gap-2">
                         <span className={`text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
                           {msg.name}
                         </span>
-                        {msg.badge && (
+                        {msg.role && msg.role !== "PARTICIPANT" && (
                           <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
                             }`}>
-                            {msg.badge}
+                            {msg.role === "MODERATOR" ? "MOD" : msg.role}
                           </span>
                         )}
-                        {msg.time && <span className="text-[10px] opacity-40">{msg.time}</span>}
+                        {msg.sentAt && <span className="text-[10px] opacity-40">{new Date(msg.sentAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
                       </div>
                       <p className={`border rounded-2xl px-3.5 py-2 mt-0.5 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
                         ? isDark
@@ -709,86 +1014,41 @@ export default function App() {
                 <div className="room-sidebar-scroll space-y-2.5 overflow-y-auto min-h-0">
                   <div className="flex items-center justify-between pb-1.5 border-b border-inherit">
                     <span className="text-xs font-bold">Room Members</span>
-                    <span className="text-[11px] opacity-50 font-mono">3 Active</span>
+                    <span className="text-[11px] opacity-50 font-mono">{participants.length} Active</span>
                   </div>
-
-                  {/* Host Card */}
-                  <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                    }`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#383838] text-white" : "bg-neutral-200 border-neutral-300 text-black"
-                        }`}>
-                        Y
-                        <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold">You</p>
-                      </div>
-                    </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
-                      }`}>
-                      HOST
-                    </span>
-                  </div>
-
-                  {/* Moderator Card */}
-                  <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                    }`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
-                        }`}>
-                        M
-                        <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold">Maya</p>
-                        <span className="text-[10px] opacity-60 font-mono">{memberRoles.maya}</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => updateMemberRole("maya", memberRoles.maya === "MODERATOR" ? "VIEWER" : "MODERATOR")}
-                      className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
-                        }`}
-                    >
-                      {memberRoles.maya === "MODERATOR" ? "Demote" : "Promote"}
-                    </button>
-                  </div>
-
-                  {/* Participant Card */}
-                  {!removedMembers.includes("liam") && (
-                    <div className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
-                      }`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
-                          }`}>
-                          L
-                          <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  {participants.map((participant) => {
+                    const isSelf = participant.userId === socketRef.current?.id;
+                    const isHost = participant.role === "HOST";
+                    const roleLabel = participant.role === "PARTICIPANT" ? "VIEWER" : participant.role;
+                    return (
+                      <div key={participant.userId} className={`audience-member-card flex items-center justify-between rounded-2xl border ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"}`}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`audience-avatar relative rounded-lg border flex items-center justify-center font-bold text-xs ${isDark ? "bg-[#272727] border-[#383838] text-white" : "bg-neutral-200 border-neutral-300 text-black"}`}>
+                            {(participant.username || "?").charAt(0).toUpperCase()}
+                            <span className="audience-online-dot absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold truncate">{isSelf ? "You" : participant.username}</p>
+                            <span className="text-[10px] opacity-60 font-mono">{roleLabel}</span>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-semibold">Liam</p>
-                          <span className="text-[10px] opacity-60 font-mono">{memberRoles.liam}</span>
-                        </div>
+                        {isHost ? (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"}`}>HOST</span>
+                        ) : currentUserRole === "HOST" && !isSelf ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button type="button" onClick={() => updateMemberRole(participant.userId, participant.role === "MODERATOR" ? "PARTICIPANT" : "MODERATOR")} className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"}`}>
+                              {participant.role === "MODERATOR" ? "Demote" : "Mod"}
+                            </button>
+                            <button type="button" onClick={() => removeMember(participant.userId)} className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium">Kick</button>
+                          </div>
+                        ) : (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${isDark ? "bg-[#272727] text-neutral-400" : "bg-[#E5E5E5] text-neutral-700"}`}>{roleLabel}</span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => updateMemberRole("liam", memberRoles.liam === "MODERATOR" ? "VIEWER" : "MODERATOR")}
-                          className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
-                            }`}
-                        >
-                          {memberRoles.liam === "MODERATOR" ? "Demote" : "Mod"}
-                        </button>
-                        <button
-                          onClick={() => removeMember("liam")}
-                          className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium"
-                        >
-                          Kick
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom: Compact host permissions */}
+                    );
+                  })}
+                  {participants.length === 0 && <p className="py-6 text-center text-xs opacity-50">Waiting for room members…</p>}
+                </div>                {/* Bottom: Compact host permissions */}
                 <div className={`room-sidebar-footer room-permissions-footer${isDark ? "" : " is-light"}`}>
                   <span className="room-permissions-title"><i /><span className="room-permissions-host">Host</span><span>Permissions</span></span>
                   <p>Playback, video changes, and queue controls are available to hosts and moderators.</p>
@@ -805,13 +1065,13 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold font-mono tracking-wider opacity-60 uppercase flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        Now Synchronized
+                        {videoId ? "Now Playing" : "Nothing Playing"}
                       </span>
-                      <span className="text-[11px] font-mono opacity-60 font-medium">LIVE</span>
+                      <span className="text-[11px] font-mono opacity-60 font-medium">{isPlaying ? "PLAYING" : "PAUSED"}</span>
                     </div>
                     <div>
-                      <p className="text-xs font-bold leading-snug">Lofi Girl — Beats to relax/study to</p>
-                      <p className="text-[11px] opacity-60 mt-0.5">Streaming via YouTube 4K Sync</p>
+                      <p className="text-xs font-bold leading-snug">{videoId ? `YouTube video ${videoId}` : "Add a video to start watching"}</p>
+                      <p className="text-[11px] opacity-60 mt-0.5">{videoId ? "Shared with everyone in this room" : "The room is ready"}</p>
                     </div>
                   </div>
 
@@ -820,12 +1080,13 @@ export default function App() {
                     <div className="flex items-center gap-1.5">
                       <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none ${isDark ? "bg-[#272727] text-white" : "bg-[#E5E5E5] text-black"
                         }`}>
-                        3
+                        {queueList.length}
                       </span>
-                      <span className="text-[11px] opacity-60 font-medium">tracks queued</span>
+                      <span className="text-[11px] opacity-60 font-medium">{queueList.length === 1 ? "video queued" : "videos queued"}</span>
                     </div>
                   </div>
 
+                  {queueList.length === 0 && <p className="py-5 text-center text-xs opacity-50">The queue is empty. Add a YouTube link to get started.</p>}
                   {queueList.map((track) => (
                     <div
                       key={track.id}
@@ -834,12 +1095,12 @@ export default function App() {
                     >
                       <div className="space-y-0.5">
                         <p className="text-xs font-semibold">{track.title}</p>
-                        <span className="text-[10px] opacity-60">{track.req}</span>
+                        <span className="text-[10px] opacity-60">Requested by {track.requestedBy}</span>
                       </div>
-                      <span className={`w-5 h-5 rounded-full border text-[10px] font-mono font-bold flex items-center justify-center shrink-0 ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-700"
-                        }`}>
-                        {track.id}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {canStartVideo && <button type="button" onClick={() => socketRef.current?.emit("queue_play", { itemId: track.id })} className="rounded-md bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-500">Play</button>}
+                        {(canStartVideo || track.requestedById === socketRef.current?.id) && <button type="button" onClick={() => socketRef.current?.emit("queue_remove", { itemId: track.id })} className="rounded-md px-2 py-1 text-[10px] opacity-60 hover:opacity-100">Remove</button>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -850,7 +1111,7 @@ export default function App() {
                     <span className="text-[10px] opacity-60 font-medium">Autoplay On</span>
                   </div>
                   <button
-                    onClick={openVideoModal}
+                    onClick={() => openVideoModal("queue")}
                     className={`w-full py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm ${isDark
                       ? "bg-[#181818] hover:bg-[#222222] border-[#272727] text-white"
                       : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-black"
@@ -889,7 +1150,7 @@ export default function App() {
             <header>
               <div>
                 <p>ROOM CONTROL</p>
-                <h2 id="change-video-title">Change the video</h2>
+                <h2 id="change-video-title">{videoModalMode === "queue" ? "Add to queue" : "Change the video"}</h2>
               </div>
               <button
                 type="button"
@@ -902,7 +1163,7 @@ export default function App() {
             </header>
 
             <p className="room-video-modal-message">
-              Paste a YouTube link to replace the current synchronized video for everyone in the room.
+              {videoModalMode === "queue" ? "Add a YouTube video for the room to watch next." : "Paste a YouTube link to change the shared video for everyone in the room."}
             </p>
 
             <form onSubmit={handleLoadVideo}>
@@ -927,7 +1188,7 @@ export default function App() {
                   type="submit"
                   className="room-video-modal-submit"
                 >
-                  Load & sync <span aria-hidden="true">→</span>
+                  {videoModalMode === "queue" ? "Add to queue" : "Load & sync"} <span aria-hidden="true">→</span>
                 </button>
               </div>
             </form>
@@ -944,8 +1205,8 @@ export default function App() {
               !
             </div>
             <div className="space-y-1">
-              <h3 className="text-base font-bold">End Session for Everyone?</h3>
-              <p className="text-xs opacity-60">All current participants will be disconnected immediately.</p>
+              <h3 className="text-base font-bold">End room for everyone?</h3>
+              <p className="text-xs opacity-60">This will disconnect every participant and close the room.</p>
             </div>
             <div className="flex gap-2 pt-2">
               <button
@@ -958,7 +1219,8 @@ export default function App() {
               <button
                 onClick={() => {
                   setShowEndModal(false);
-                  showToastMsg("Room has ended.");
+                  if (!socketRef.current?.connected) return showToastMsg("Reconnect before ending the room.");
+                  socketRef.current.emit("end_room");
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-[#FF0000] hover:bg-red-600 text-xs font-bold text-white transition shadow-lg shadow-red-600/30"
               >
@@ -970,5 +1232,13 @@ export default function App() {
       )}
 
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#0F0F0F] text-white grid place-items-center text-sm">Connecting to room…</main>}>
+      <RoomPage />
+    </Suspense>
   );
 }
