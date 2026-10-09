@@ -1,635 +1,996 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { createWatchSyncSocket } from "@/lib/socket";
-import ThemeToggle, { useTheme } from "@/components/theme-toggle";
+import React, { useState, useEffect, useRef } from "react";
 
-function loadYouTubeApi() {
-    if (window.YT?.Player) return Promise.resolve(window.YT);
-    if (window.watchSyncYouTubeApi) return window.watchSyncYouTubeApi;
-    window.watchSyncYouTubeApi = new Promise((resolve, reject) => {
-        const existingScript = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
-        const previousReady = window.onYouTubeIframeAPIReady;
-        window.onYouTubeIframeAPIReady = () => {
-            previousReady?.();
-            resolve(window.YT);
-        };
-        if (!existingScript) {
-            const script = document.createElement("script");
-            script.src = "https://www.youtube.com/iframe_api";
-            script.onerror = reject;
-            document.head.appendChild(script);
+export default function App() {
+  const [isDark, setIsDark] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(80);
+  const [currentTime, setCurrentTime] = useState(42);
+  const duration = 180;
+  const [currentTab, setCurrentTab] = useState("chat");
+  const [showVolumePopup, setShowVolumePopup] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [showEndModal, setShowEndModal] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("https://www.youtube.com/watch?v=jfKfPfyJRdk");
+  const [videoId, setVideoId] = useState("jfKfPfyJRdk");
+  const [toast, setToast] = useState("");
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [reactions, setReactions] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: 1,
+      name: "System",
+      text: "Welcome to WatchSync! Playback is locked in exact real-time sync with all peers.",
+      isSystem: true,
+    },
+    {
+      id: 2,
+      name: "Maya",
+      badge: "MOD",
+      text: "Sound and 4K quality look crisp 🔥 Everyone ready for the drop?",
+      time: "2m ago",
+    },
+    {
+      id: 3,
+      name: "Liam",
+      text: "Audio sync is zero-delay. Loving this track! 🎶",
+      time: "Just now",
+    },
+  ]);
+
+  const [queueList] = useState([
+    { id: 1, title: "Interstellar Live Orchestra", req: "Requested by Liam • 4:12" },
+    { id: 2, title: "Lofi Hip Hop Radio 24/7", req: "Requested by Maya • Live" },
+    { id: 3, title: "Cyberpunk 2077 Night City Mix", req: "Requested by You • 3:45" },
+  ]);
+
+  const customVolTrackRef = useRef(null);
+  const isDraggingVolRef = useRef(false);
+  const chatAnchorRef = useRef(null);
+  const toastTimeoutRef = useRef(null);
+
+  const showToastMsg = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setToast(""), 2500);
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (isPlaying) {
+        setCurrentTime((prev) => (prev < duration ? prev + 1 : prev));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isPlaying, duration]);
+
+  useEffect(() => {
+    if (currentTab === "chat") {
+      chatAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, currentTab]);
+
+  const applyVolumeLevel = (newVol, notify = false) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(newVol)));
+    setVolume(clamped);
+    const mutedState = clamped === 0;
+    setIsMuted(mutedState);
+    if (notify) {
+      showToastMsg(mutedState ? "Muted" : `Volume ${clamped}%`);
+    }
+  };
+
+  const calculateVolumeFromY = (clientY) => {
+    if (!customVolTrackRef.current) return 0;
+    const rect = customVolTrackRef.current.getBoundingClientRect();
+    const relativeY = clientY - rect.top;
+    const pct = 100 - (relativeY / rect.height) * 100;
+    return pct;
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!isDraggingVolRef.current) return;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      applyVolumeLevel(calculateVolumeFromY(clientY));
+    };
+
+    const handleUp = () => {
+      if (isDraggingVolRef.current) {
+        isDraggingVolRef.current = false;
+      }
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: true });
+    window.addEventListener("touchend", handleUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+    };
+  }, []);
+
+  const triggerReaction = (emoji) => {
+    const id = Date.now() + Math.random();
+    const offsetRight = 14 + Math.floor(Math.random() * 38);
+    setReactions((prev) => [...prev, { id, emoji, offsetRight }]);
+    setTimeout(() => {
+      setReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 1700);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === "INPUT") return;
+      const keyMap = { "1": "🔥", "2": "❤️", "3": "👏", "4": "😂", "5": "⚡", "6": "😮" };
+      if (keyMap[e.key]) {
+        triggerReaction(keyMap[e.key]);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const handleCopyLink = () => {
+    navigator.clipboard?.writeText(window.location.href);
+    setCopiedLink(true);
+    showToastMsg("Link copied to clipboard!");
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        name: "You",
+        badge: "HOST",
+        text: chatInput.trim(),
+        time: "Just now",
+      },
+    ]);
+    setChatInput("");
+  };
+
+  const handleLoadVideo = (e) => {
+    e.preventDefault();
+    const match = videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|shorts\/|embed\/))([\w-]{11})/i);
+    const vId = match ? match[1] : (videoUrl.trim().length === 11 ? videoUrl.trim() : "jfKfPfyJRdk");
+    setVideoId(vId);
+    setShowVideoModal(false);
+    setCurrentTime(0);
+    showToastMsg("Video synchronized with room!");
+  };
+
+  const formatTime = (s) => {
+    const mins = Math.floor(s / 60);
+    const secs = String(s % 60).padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
+  return (
+    <div className={`watch-room-page ${!isDark ? "theme-light" : "theme-dark"} min-h-screen flex flex-col font-sans transition-colors duration-200 antialiased selection:bg-[#FF0000] selection:text-white ${
+      isDark ? "bg-[#0F0F0F] text-[#F1F1F1]" : "bg-[#F8F8F9] text-[#0F0F0F]"
+    }`}>
+      <style>{`
+        @keyframes igReactionFloat {
+          0% {
+            opacity: 0;
+            transform: translateY(8px) scale(0.65) rotate(0deg);
+          }
+          15% {
+            opacity: 0.85;
+            transform: translateY(-8px) scale(1.05) rotate(-3deg);
+          }
+          65% {
+            opacity: 0.6;
+            transform: translateY(-52px) scale(0.95) rotate(3deg);
+          }
+          100% {
+            opacity: 0;
+            transform: translateY(-95px) scale(0.7) rotate(-1deg);
+          }
         }
-    });
-    return window.watchSyncYouTubeApi;
-}
-
-const demoParticipants = [
-    { name: "You", role: "HOST" },
-    { name: "Waiting for friends", role: "PARTICIPANT" },
-];
-
-function RoomContent({ params }) {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const [roomId, setRoomId] = useState("");
-    const [activeTab, setActiveTab] = useState("participants");
-    const [message, setMessage] = useState("");
-    const [chat, setChat] = useState([]);
-    const [videoId, setVideoId] = useState("");
-    const [videoInput, setVideoInput] = useState("");
-    const [showVideoForm, setShowVideoForm] = useState(false);
-    const [reactions, setReactions] = useState([]);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [isMuted, setIsMuted] = useState(false);
-    const [connection, setConnection] = useState("connecting");
-    const [roomStatus, setRoomStatus] = useState("loading");
-    const [roomError, setRoomError] = useState("");
-    const [joinName, setJoinName] = useState("");
-    const [joinMode, setJoinMode] = useState("join");
-    const [roomRole, setRoomRole] = useState("");
-    const [selfUserId, setSelfUserId] = useState("");
-    const [joinError, setJoinError] = useState("");
-    const [liveParticipants, setLiveParticipants] = useState([]);
-    const [toast, setToast] = useState("");
-    const [showEndRoomPrompt, setShowEndRoomPrompt] = useState(false);
-    const theme = useTheme("dark");
-    const socketRef = useRef(null);
-    const videoStageRef = useRef(null);
-    const playerContainerRef = useRef(null);
-    const playerRef = useRef(null);
-    const canControlRef = useRef(false);
-    const applyingRemotePlaybackRef = useRef(false);
-    const playbackStateRef = useRef({ playState: "paused", currentTime: 0, updatedAt: 0 });
-    const lastObservedTimeRef = useRef(0);
-    const toastTimeoutRef = useRef(null);
-    const roomVerificationCompleteRef = useRef(false);
-
-    useEffect(() => {
-        Promise.resolve(params).then((value) => setRoomId(value.roomId));
-    }, [params]);
-
-    useEffect(() => {
-        const queryName = searchParams.get("name");
-        const queryMode = searchParams.get("mode");
-        if (!queryName && !queryMode) return;
-        if (queryName && (queryMode === "create" || queryMode === "join")) {
-            window.sessionStorage.setItem("watchsync-pending-join", JSON.stringify({ name: queryName, mode: queryMode }));
+        .ig-reaction-bubble {
+          animation: igReactionFloat 1.6s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+          will-change: transform, opacity;
         }
-        router.replace(`/room/${searchParams.get("roomId") || window.location.pathname.split("/").pop()}`);
-    }, [router, searchParams]);
+      `}</style>
+      {/* Top Navigation Header */}
+      <header className={`h-16 px-4 md:px-7 border-b flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl transition-colors ${
+        isDark ? "bg-[#0F0F0F]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
+      }`}>
+        {/* Left: Brand + Room Code Badge */}
+        <div className="flex items-center gap-3 sm:gap-5">
+          <div className="flex items-center gap-2 select-none cursor-pointer">
+            <span className="w-3.5 h-3.5 bg-[#FF0000] rounded-sm shrink-0 shadow-[0_0_8px_rgba(255,0,0,0.5)]"></span>
+            <div className="flex items-baseline text-lg font-black tracking-tight">
+              <span className={isDark ? "text-white" : "text-[#0F0F0F]"}>watch</span>
+              <span className="text-[#FF3B30] ml-0.5">sync</span>
+            </div>
+          </div>
 
-    const name = joinName || "Guest";
-    const mode = joinMode;
-    const isHost = roomRole === "HOST";
-    const canControl = roomRole === "HOST" || roomRole === "MODERATOR";
-    const participants = liveParticipants.length > 0 ? liveParticipants : (isHost ? demoParticipants : [{ name, role: "PARTICIPANT" }]);
+          {/* Room Pill */}
+          <div
+            onClick={() => {
+              navigator.clipboard?.writeText("sync-8842");
+              showToastMsg("Room code 'sync-8842' copied!");
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border cursor-pointer transition select-none ${
+              isDark ? "bg-[#181818] border-[#272727] hover:border-neutral-600" : "bg-[#F2F2F2] border-[#E5E5E5] hover:border-neutral-400"
+            }`}
+            title="Click to copy Room Code"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#FF0000] animate-pulse"></span>
+            <span className="text-neutral-500 text-[11px] font-medium uppercase tracking-wider">Room</span>
+            <span className="font-mono text-[11px] font-semibold">sync-8842</span>
+          </div>
 
-    useEffect(() => {
-        canControlRef.current = canControl;
-    }, [canControl, isHost]);
+          {/* Synchronized Watchers Badge */}
+          <div className={`hidden lg:flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${
+            isDark ? "bg-[#181818] border-[#272727] text-neutral-300" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700"
+          }`}>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>14,290 synchronized watchers</span>
+          </div>
+        </div>
 
-    const readPendingJoin = useCallback(() => {
-        const rawPendingJoin = window.sessionStorage.getItem("watchsync-pending-join");
-        if (!rawPendingJoin) return null;
-        try {
-            const pendingJoin = JSON.parse(rawPendingJoin);
-            if (pendingJoin.roomId === roomId && pendingJoin.name && (pendingJoin.mode === "create" || pendingJoin.mode === "join")) return pendingJoin;
-        } catch (error) {
-            console.error("Unable to read pending room join", error);
-        }
-        window.sessionStorage.removeItem("watchsync-pending-join");
-        return null;
-    }, [roomId]);
+        {/* Right: Header Actions */}
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          {/* Dark / Light Theme Toggle */}
+          <button
+            onClick={() => {
+              setIsDark(!isDark);
+              showToastMsg(!isDark ? "Dark mode activated" : "Light mode activated");
+            }}
+            className={`p-2 rounded-xl border transition ${
+              isDark ? "bg-[#181818] border-[#272727] text-neutral-300 hover:text-white" : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-700 hover:text-black"
+            }`}
+            title="Toggle theme"
+          >
+            {isDark ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 3a9 9 0 000 18V3z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            )}
+          </button>
 
-    const readActiveSession = useCallback(() => {
-        const rawSession = window.sessionStorage.getItem(`watchsync-room-${roomId}`);
-        if (!rawSession) return null;
-        try {
-            const activeSession = JSON.parse(rawSession);
-            if (activeSession.roomId === roomId && activeSession.name && (activeSession.mode === "create" || activeSession.mode === "join")) return activeSession;
-        } catch (error) {
-            console.error("Unable to read active room session", error);
-        }
-        window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
-        return null;
-    }, [roomId]);
+          {/* Copy Link Button */}
+          <button
+            onClick={handleCopyLink}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition shadow-sm active:scale-95 ${
+              copiedLink
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
+                : isDark
+                ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
+                : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
+            }`}
+          >
+            {copiedLink ? (
+              <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5 text-[#FF0000]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            )}
+            <span>{copiedLink ? "Copied!" : "Copy Link"}</span>
+          </button>
 
-    const saveActiveSession = useCallback((session) => {
-        window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify({ ...session, roomId }));
-    }, [roomId]);
+          {/* End Room Button */}
+          <button
+            onClick={() => setShowEndModal(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#FF0000]/10 hover:bg-[#FF0000]/20 text-[#FF0000] border border-[#FF0000]/30 transition active:scale-95"
+          >
+            End Room
+          </button>
+        </div>
+      </header>
 
-    const clearRoomSession = useCallback(() => {
-        window.sessionStorage.removeItem(`watchsync-room-${roomId}`);
-        window.sessionStorage.removeItem("watchsync-pending-join");
-    }, [roomId]);
+      {/* Main Workspace Theater */}
+      <main className="flex-1 w-full max-w-[1720px] mx-auto p-3 sm:p-5 md:p-6 lg:p-7 flex flex-col justify-start">
+        {/* Equal-Height Synchronized Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_410px] gap-4 items-stretch">
+          
+          {/* Left Column: Video Stage + Controls Bar */}
+          <section className="flex flex-col gap-3 min-w-0">
+            {/* Video Canvas Row + Dedicated Instant Reaction Rail */}
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+              
+              {/* Video Player Frame */}
+              <div className={`relative flex-1 aspect-video rounded-2xl md:rounded-3xl overflow-hidden border shadow-2xl flex items-center justify-center group select-none ${
+                isDark ? "bg-black border-[#272727] shadow-black/80" : "bg-black border-[#E5E5E5] shadow-neutral-400/20"
+              }`}>
+                {/* Embedded YouTube Player */}
+                <iframe
+                  className="w-full h-full pointer-events-none"
+                  src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&controls=0&modestbranding=1&rel=0&playsinline=1&autoplay=1&cc_load_policy=0`}
+                  title="WatchSync Theater"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                />
 
-    function applyPlaybackUpdate(action, currentTime) {
-        const player = playerRef.current;
-        if (!player) return;
-        applyingRemotePlaybackRef.current = true;
-        if (action === "seek") player.seekTo(currentTime, true);
-        if (action === "play") player.playVideo();
-        if (action === "pause") player.pauseVideo();
-        setCurrentTime(currentTime);
-        window.setTimeout(() => {
-            applyingRemotePlaybackRef.current = false;
-            lastObservedTimeRef.current = currentTime;
-        }, 700);
-    }
-
-    useEffect(() => {
-        if (!roomId) return undefined;
-        const socket = createWatchSyncSocket();
-        socketRef.current = socket;
-        const onConnect = () => {
-            setConnection("connected");
-            const session = readPendingJoin() || readActiveSession();
-            if (session?.mode === "create") {
-                const sessionId = session.sessionId || crypto.randomUUID();
-                setJoinName(session.name);
-                setJoinMode("create");
-                saveActiveSession({ name: session.name, mode: session.mode, sessionId });
-                socket.emit("create_room", { roomId, sessionId });
-                return;
-            }
-            socket.emit("check_room", { roomId });
-        };
-        const onDisconnect = () => setConnection("reconnecting");
-        const onParticipants = (payload) => setLiveParticipants(payload.participants || []);
-        const onRoleAssigned = (payload = {}) => {
-            setLiveParticipants(payload.participants || []);
-            if (payload.userId === socket.id) setRoomRole(payload.role || "PARTICIPANT");
-            if (payload.userId === socket.id) {
-                const session = readActiveSession();
-                if (session) saveActiveSession({ ...session, role: payload.role });
-            }
-            setToast(payload.userId === socket.id ? `You are now ${payload.role.toLowerCase()}` : `${payload.username} is now ${payload.role.toLowerCase()}`);
-        };
-        const onParticipantRemoved = () => {
-            clearRoomSession();
-            socket.disconnect();
-            router.push("/");
-        };
-        const onRoomEnded = () => {
-            clearRoomSession();
-            router.push("/");
-        };
-        const onRoomAvailable = (payload = {}) => {
-            roomVerificationCompleteRef.current = true;
-            const nextJoin = readPendingJoin() || readActiveSession();
-            if (nextJoin) {
-                const sessionId = nextJoin.sessionId || crypto.randomUUID();
-                setJoinName(nextJoin.name);
-                setJoinMode(nextJoin.mode);
-                saveActiveSession({ ...nextJoin, sessionId });
-                window.sessionStorage.removeItem("watchsync-pending-join");
-                socket.emit("join_room", { roomId, username: nextJoin.name, mode: nextJoin.mode, sessionId });
-            } else {
-                setRoomStatus("join");
-            }
-        };
-        const onSocketError = (payload) => {
-            if (payload?.code === "ROOM_NOT_FOUND") {
-                roomVerificationCompleteRef.current = true;
-                setRoomStatus("not-found");
-                socket.disconnect();
-                return;
-            }
-            roomVerificationCompleteRef.current = true;
-            setRoomError(payload?.message || "The room could not be verified.");
-            setRoomStatus("error");
-        };
-        const onSyncState = (payload = {}) => {
-            roomVerificationCompleteRef.current = true;
-            setChat(Array.isArray(payload.chat) ? payload.chat : []);
-            setVideoId(payload.videoId || "");
-            setRoomRole(payload.selfRole || "PARTICIPANT");
-            setSelfUserId(payload.selfUserId || socket.id);
-            playbackStateRef.current = {
-                playState: payload.playState || "paused",
-                currentTime: Number(payload.currentTime) || 0,
-                updatedAt: Number(payload.updatedAt) || Date.now(),
-            };
-            setCurrentTime(playbackStateRef.current.currentTime);
-            setIsPlaying(payload.playState === "playing");
-            const session = readPendingJoin() || readActiveSession();
-            if (session) saveActiveSession(session);
-            setRoomStatus("ready");
-        };
-        const onNewMessage = (chatMessage) => {
-            if (!chatMessage?.id || !chatMessage.name || !chatMessage.text) return;
-            setChat((current) => {
-                if (current.some((item) => item.id === chatMessage.id)) return current;
-                return [...current, chatMessage].slice(-100);
-            });
-        };
-        const onVideoUpdated = ({ videoId: nextVideoId } = {}) => {
-            setVideoId(nextVideoId || "");
-            setIsPlaying(false);
-            setCurrentTime(0);
-            setDuration(0);
-            playbackStateRef.current = { playState: "paused", currentTime: 0, updatedAt: Date.now() };
-        };
-        const onPlaybackUpdated = ({ action, currentTime, updatedAt } = {}) => {
-            playbackStateRef.current = {
-                playState: action === "play" ? "playing" : action === "pause" ? "paused" : playbackStateRef.current.playState,
-                currentTime: Number(currentTime) || 0,
-                updatedAt: Number(updatedAt) || Date.now(),
-            };
-            setCurrentTime(playbackStateRef.current.currentTime);
-            setIsPlaying(playbackStateRef.current.playState === "playing");
-            applyPlaybackUpdate(action, Number(currentTime) || 0);
-        };
-        const onRoomReaction = (reaction) => {
-            if (!reaction?.id || !reaction.emoji) return;
-            setReactions((current) => [...current, reaction].slice(-12));
-            window.setTimeout(() => setReactions((current) => current.filter((item) => item.id !== reaction.id)), 2600);
-        };
-        socket.on("connect", onConnect);
-        socket.on("disconnect", onDisconnect);
-        socket.on("error", onSocketError);
-        socket.on("room_not_found", onSocketError);
-        socket.on("room_available", onRoomAvailable);
-        socket.on("sync_state", onSyncState);
-        socket.on("new_message", onNewMessage);
-        socket.on("video_updated", onVideoUpdated);
-        socket.on("playback_updated", onPlaybackUpdated);
-        socket.on("room_reaction", onRoomReaction);
-        socket.on("role_assigned", onRoleAssigned);
-        socket.on("participant_removed", onParticipantRemoved);
-        socket.on("user_joined", onParticipants);
-        socket.on("user_left", onParticipants);
-        socket.on("room_ended", onRoomEnded);
-        socket.connect();
-        const verificationTimeout = setTimeout(() => {
-            if (!roomVerificationCompleteRef.current) {
-                roomVerificationCompleteRef.current = true;
-                setRoomError("The room server did not respond. Please try again.");
-                setRoomStatus("error");
-                socket.disconnect();
-            }
-        }, 8000);
-        return () => {
-            clearTimeout(verificationTimeout);
-            socket.disconnect();
-            socketRef.current = null;
-            roomVerificationCompleteRef.current = false;
-        };
-    }, [clearRoomSession, readActiveSession, readPendingJoin, roomId, router, saveActiveSession]);
-
-    function emitPlaybackAction(action, currentTime) {
-        socketRef.current?.emit("playback_action", { action, currentTime });
-    }
-
-    function disableYouTubeCaptions(player) {
-        if (typeof player?.unloadModule !== "function") return;
-        player.unloadModule("captions");
-    }
-
-    useEffect(() => {
-        if (!videoId || !playerContainerRef.current) return undefined;
-        let cancelled = false;
-        let pollTimer;
-        loadYouTubeApi().then((YT) => {
-            if (cancelled || !playerContainerRef.current) return;
-            const options = {
-                videoId,
-                playerVars: {
-                    controls: 0,
-                    disablekb: 1,
-                    fs: 0,
-                    iv_load_policy: 3,
-                    cc_load_policy: 0,
-                    modestbranding: 1,
-                    rel: 0,
-                    playsinline: 1,
-                },
-                events: {
-                    onReady: (event) => {
-                        const playback = playbackStateRef.current;
-                        const synchronizedTime = playback.playState === "playing"
-                            ? playback.currentTime + (Date.now() - playback.updatedAt) / 1000
-                            : playback.currentTime;
-                        disableYouTubeCaptions(event.target);
-                        setDuration(event.target.getDuration() || 0);
-                        event.target.seekTo(Math.max(0, synchronizedTime), true);
-                        setCurrentTime(Math.max(0, synchronizedTime));
-                        applyingRemotePlaybackRef.current = true;
-                        if (playback.playState === "playing") event.target.playVideo();
-                        else event.target.pauseVideo();
-                        window.setTimeout(() => {
-                            applyingRemotePlaybackRef.current = false;
-                        }, 700);
-                        lastObservedTimeRef.current = synchronizedTime;
-                    },
-                    onApiChange: (event) => disableYouTubeCaptions(event.target),
-                    onStateChange: (event) => {
-                        const player = event.target;
-                        const currentTime = player.getCurrentTime();
-                        setCurrentTime(currentTime);
-                        lastObservedTimeRef.current = currentTime;
-                        if (applyingRemotePlaybackRef.current) return;
-                        if (!canControlRef.current) return;
-                        if (event.data === YT.PlayerState.PLAYING) {
-                            setIsPlaying(true);
-                            emitPlaybackAction("play", currentTime);
-                        } else if (event.data === YT.PlayerState.PAUSED) {
-                            setIsPlaying(false);
-                            emitPlaybackAction("pause", currentTime);
-                        }
-                    },
-                },
-            };
-            playerRef.current = new YT.Player(playerContainerRef.current, options);
-            pollTimer = window.setInterval(() => {
-                const player = playerRef.current;
-                if (!canControlRef.current) return;
-                if (!player || applyingRemotePlaybackRef.current || typeof player.getPlayerState !== "function") return;
-                if (player.getPlayerState() !== YT.PlayerState.PLAYING && player.getPlayerState() !== YT.PlayerState.PAUSED) return;
-                const currentTime = player.getCurrentTime();
-                setCurrentTime(currentTime);
-                if (Math.abs(currentTime - lastObservedTimeRef.current) > 1.5) {
-                    lastObservedTimeRef.current = currentTime;
-                    playbackStateRef.current.currentTime = currentTime;
-                    emitPlaybackAction("seek", currentTime);
-                } else {
-                    lastObservedTimeRef.current = currentTime;
-                }
-            }, 300);
-        }).catch((error) => console.error("Unable to load YouTube player", error));
-        return () => {
-            cancelled = true;
-            window.clearInterval(pollTimer);
-            playerRef.current?.destroy();
-            playerRef.current = null;
-        };
-    }, [videoId]);
-
-    useEffect(() => () => clearTimeout(toastTimeoutRef.current), []);
-
-    useEffect(() => {
-        if (!showEndRoomPrompt) return undefined;
-        const handleKeyDown = (event) => {
-            if (event.key === "Escape") setShowEndRoomPrompt(false);
-        };
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [showEndRoomPrompt]);
-
-    async function copyRoomLink() {
-        try {
-            if (!navigator.clipboard) {
-                throw new Error("Clipboard access is unavailable");
-            }
-            await navigator.clipboard.writeText(window.location.href);
-            setToast("Link copied");
-            clearTimeout(toastTimeoutRef.current);
-            toastTimeoutRef.current = setTimeout(() => setToast(""), 2500);
-        } catch (error) {
-            console.error("Unable to copy room link", error);
-            setToast("Could not copy link");
-            clearTimeout(toastTimeoutRef.current);
-            toastTimeoutRef.current = setTimeout(() => setToast(""), 2500);
-        }
-    }
-
-    function handleRoomExit() {
-        if (isHost) {
-            setShowEndRoomPrompt(true);
-            return;
-        } else {
-            socketRef.current?.emit("leave_room");
-        }
-        clearRoomSession();
-        router.push("/");
-    }
-
-    function endRoom() {
-        socketRef.current?.emit("end_room");
-        clearRoomSession();
-        setShowEndRoomPrompt(false);
-        router.push("/");
-    }
-
-    function sendMessage(event) {
-        event.preventDefault();
-        const cleanMessage = message.trim();
-        if (!cleanMessage) return;
-        socketRef.current?.emit("send_message", { text: cleanMessage });
-        setMessage("");
-    }
-
-    function extractVideoId(value) {
-        const match = value.trim().match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|shorts\/|embed\/))([\w-]{11})/i);
-        return match ? match[1] : (/^[\w-]{11}$/.test(value.trim()) ? value.trim() : "");
-    }
-
-    function chooseVideo(event) {
-        event.preventDefault();
-        if (!canControl) return;
-        const nextVideoId = extractVideoId(videoInput);
-        if (!nextVideoId) {
-            setToast("Paste a valid YouTube link");
-            return;
-        }
-        socketRef.current?.emit("set_video", { videoId: nextVideoId });
-        setShowVideoForm(false);
-        setVideoInput("");
-    }
-
-    function sendReaction(emoji) {
-        socketRef.current?.emit("send_reaction", { emoji });
-    }
-
-    function assignRole(userId, role) {
-        socketRef.current?.emit("assign_role", { userId, role });
-    }
-
-    function removeParticipant(userId) {
-        socketRef.current?.emit("remove_participant", { userId });
-    }
-
-    function togglePlayback() {
-        if (!canControl || !playerRef.current || !videoId) return;
-        const currentTime = playerRef.current.getCurrentTime();
-        if (isPlaying) playerRef.current.pauseVideo();
-        else playerRef.current.playVideo();
-        emitPlaybackAction(isPlaying ? "pause" : "play", currentTime);
-    }
-
-    function seekVideo(event) {
-        if (!canControl || !playerRef.current) return;
-        const nextTime = Number(event.target.value);
-        playerRef.current.seekTo(nextTime, true);
-        setCurrentTime(nextTime);
-        playbackStateRef.current.currentTime = nextTime;
-        emitPlaybackAction("seek", nextTime);
-    }
-
-    function toggleMute() {
-        const player = playerRef.current;
-        if (!player) return;
-        if (isMuted) player.unMute();
-        else player.mute();
-        setIsMuted(!isMuted);
-    }
-
-    async function toggleFullscreen() {
-        const fullscreenTarget = videoStageRef.current;
-        if (!fullscreenTarget) return;
-        try {
-            if (document.fullscreenElement) {
-                await document.exitFullscreen();
-                return;
-            }
-            const requestFullscreen = fullscreenTarget.requestFullscreen || fullscreenTarget.webkitRequestFullscreen;
-            if (typeof requestFullscreen !== "function") {
-                setToast("Fullscreen is not supported in this browser");
-                return;
-            }
-            await requestFullscreen.call(fullscreenTarget);
-        } catch (error) {
-            console.error("Unable to enter fullscreen", error);
-            setToast("Fullscreen was blocked by the browser");
-            clearTimeout(toastTimeoutRef.current);
-            toastTimeoutRef.current = setTimeout(() => setToast(""), 2500);
-        }
-    }
-
-    function formatTime(value) {
-        const totalSeconds = Math.max(0, Math.floor(Number(value) || 0));
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = String(totalSeconds % 60).padStart(2, "0");
-        return `${minutes}:${seconds}`;
-    }
-
-    function joinRoom(event) {
-        event.preventDefault();
-        const cleanName = joinName.trim();
-        if (!cleanName) {
-            setJoinError("Enter your name to join this room.");
-            return;
-        }
-        setJoinError("");
-        const sessionId = crypto.randomUUID();
-        saveActiveSession({ name: cleanName, mode: "join", sessionId });
-        socketRef.current?.emit("join_room", { roomId, username: cleanName, mode: "join", sessionId });
-        setRoomStatus("joining");
-    }
-
-    if (roomStatus === "not-found") {
-        return (
-            <main className="missing-shell">
-                <div className="missing-code">404</div>
-                <p className="eyebrow"><span /> Room not found</p>
-                <h1>Room not<br /><em>found.</em></h1>
-                <p className="missing-copy">This room does not exist or has ended.</p>
-                <button className="primary-action missing-action" onClick={() => router.push("/")} type="button">Back to watchsync <span>↗</span></button>
-            </main>
-        );
-    }
-
-    if (roomStatus === "loading") {
-        return <main className="room-loading">Checking room...</main>;
-    }
-
-    if (roomStatus === "error") {
-        return (
-            <main className="missing-shell">
-                <div className="missing-code">ERROR</div>
-                <p className="eyebrow"><span /> Room unavailable</p>
-                <h1>Couldn&apos;t check<br /><em>this room.</em></h1>
-                <p className="missing-copy">Please try again.</p>
-                <button className="primary-action missing-action" onClick={() => window.location.reload()} type="button">Try again <span>↗</span></button>
-            </main>
-        );
-    }
-
-    if (roomStatus === "join" || roomStatus === "joining") {
-        return (
-            <main className={`landing-shell theme-${theme}`}>
-                <section className="room-join-card" aria-labelledby="join-room-title">
-                    <span className="confirmation-icon">↗</span>
-                    <p className="confirmation-kicker">You&apos;ve been invited</p>
-                    <h1 id="join-room-title">Join room<br /><em>{roomId}</em></h1>
-                    <p className="missing-copy">Enter your name before joining this private watch room.</p>
-                    <form onSubmit={joinRoom}>
-                        <label>Your name<input value={joinName} onChange={(event) => { setJoinName(event.target.value); setJoinError(""); }} placeholder="What should we call you?" maxLength={32} autoFocus /></label>
-                        {joinError && <p className="form-error" role="alert">{joinError}</p>}
-                        <button className="primary-action" disabled={roomStatus === "joining"} type="submit">{roomStatus === "joining" ? "Joining..." : "Join room"}<span>↗</span></button>
-                    </form>
-                </section>
-            </main>
-        );
-    }
-
-    return (
-        <main className={`room-shell theme-${theme}${showEndRoomPrompt ? " modal-open" : ""}`}>
-            <header className="room-header">
-                <button className="room-brand" onClick={() => router.push("/")} type="button"><span className="brand-dot" />watchsync</button>
-                <div className="room-heading"><span>Watch room</span><strong>{roomId || "..."}</strong></div>
-                <div className="room-actions"><ThemeToggle defaultTheme={theme} /><button className="copy-button" type="button" onClick={copyRoomLink}>Copy link</button><button className="leave-button" onClick={handleRoomExit} type="button">{isHost ? "End room" : "Leave"}</button></div>
-            </header>
-
-            <section className="room-layout">
-                <div className="player-column">
-                    <div ref={videoStageRef} className="video-stage">
-                        {videoId ? <div ref={playerContainerRef} className={`video-frame${canControl ? "" : " participant-video"}`} aria-label="Shared YouTube video">{!canControl && <span className="participant-video-shield" aria-hidden="true" />}{canControl && <button className="video-play-overlay" type="button" aria-label={isPlaying ? "Pause shared video" : "Play shared video"} onClick={togglePlayback} />}</div> : <div className={`video-placeholder${canControl ? "" : " participant-placeholder"}`}><div className="play-symbol" aria-hidden="true">{canControl ? "▶" : "•"}</div><p>{canControl ? "Choose a video to begin" : "Waiting for the host or moderator"}</p><span>{canControl ? "Paste a YouTube link from the room controls" : "They will choose a video for everyone to watch"}</span></div>}
-                        <div className="reaction-popups" aria-live="polite">{reactions.map((reaction) => <span key={reaction.id} title={`${reaction.name} reacted`}>{reaction.emoji}</span>)}</div>
-                    </div>
-                    <div className={`player-bar${canControl ? "" : " participant-player-bar"}`}>
-                        {canControl && <button className="control-button" type="button" aria-label={isPlaying ? "Pause video" : "Play video"} onClick={togglePlayback} disabled={!videoId}>{isPlaying ? "Ⅱ" : "▶"}</button>}
-                        {canControl && <input className="timeline" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime, duration || 1)} onChange={seekVideo} aria-label="Seek video" disabled={!videoId || !duration} />}
-                        <span className="timecode">{!videoId && !canControl ? "Waiting for host or moderator" : `${formatTime(currentTime)} / ${duration ? formatTime(duration) : "--:--"}`}</span>
-                        {canControl && <button className="control-button faint volume-button" type="button" aria-label={isMuted ? "Unmute video" : "Mute video"} onClick={toggleMute} disabled={!videoId}>
-                            <svg aria-hidden="true" viewBox="0 0 24 24">
-                                <path d="M4 9v6h4l5 4V5L8 9H4Z" />
-                                <path d="M16 9.5a4 4 0 0 1 0 5M18.5 7a7.5 7.5 0 0 1 0 10" />
-                            </svg>
-                        </button>}
-                        <button className="control-button faint" type="button" aria-label="Fullscreen" onClick={toggleFullscreen} disabled={!videoId}>⛶</button>
-                    </div>
-                    <div className="video-tools"><span>{canControl ? "You can control shared playback" : "Shared playback is controlled by the host and moderators"}</span>{canControl && <button type="button" onClick={() => setShowVideoForm((current) => !current)}>Change video <b>↗</b></button>}</div>
-                    {showVideoForm && canControl && <form className="video-form" onSubmit={chooseVideo}><input value={videoInput} onChange={(event) => setVideoInput(event.target.value)} placeholder="Paste a YouTube link" aria-label="YouTube video link" /><button type="submit">Load</button></form>}
+                {/* Clickable Overlay with Pure Floating Icon (NO Gray Box) */}
+                <div
+                  onClick={() => {
+                    setIsPlaying(!isPlaying);
+                    showToastMsg(!isPlaying ? "Stream Resumed" : "Stream Paused");
+                  }}
+                  className="absolute inset-0 z-10 cursor-pointer flex items-center justify-center bg-black/10 hover:bg-black/25 transition group/overlay"
+                >
+                  <div className={`text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)] flex items-center justify-center transition-all duration-200 select-none pointer-events-none ${
+                    isPlaying ? "opacity-0 scale-90 group-hover/overlay:opacity-100 group-hover/overlay:scale-100" : "opacity-95 scale-100"
+                  }`}>
+                    <span className="text-5xl md:text-6xl font-black">
+                      {isPlaying ? "❚❚" : "▶"}
+                    </span>
+                  </div>
                 </div>
 
-                <aside className="room-sidebar">
-                    <div className="sidebar-tabs" role="tablist">
-                        <button className={activeTab === "participants" ? "active" : ""} onClick={() => setActiveTab("participants")} type="button">People <span>{participants.length}</span></button>
-                        <button className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")} type="button">Live chat</button>
-                    </div>
-                    <div className={`quick-reactions${!videoId ? " reactions-disabled" : ""}`} aria-label="Quick reactions"><span>React</span>{["❤️", "😂", "👏", "🔥", "😮"].map((emoji) => <button key={emoji} type="button" onClick={() => sendReaction(emoji)} aria-label={`Send ${emoji} reaction`} disabled={!videoId}>{emoji}</button>)}</div>
-                    {activeTab === "participants" ? <div className="participant-content"><div className="sidebar-title"><h2>In this room</h2><span>{participants.length} online</span></div><div className="participant-list">{participants.map((participant) => { const participantName = participant.name || participant.username; const canManage = isHost && participant.userId && participant.userId !== selfUserId && participant.role !== "HOST"; return <div className="participant" key={participant.userId || participantName}><span className={`avatar ${participant.role.toLowerCase()}`}>{participantName.slice(0, 1).toUpperCase()}</span><div><strong>{participantName}</strong><small>{participant.role}</small></div>{participant.role === "HOST" && <span className="host-mark">HOST</span>}{participant.role === "MODERATOR" && <span className="host-mark">MOD</span>}{canManage && <div className="participant-actions"><button type="button" onClick={() => assignRole(participant.userId, participant.role === "MODERATOR" ? "PARTICIPANT" : "MODERATOR")} aria-label={`${participant.role === "MODERATOR" ? "Remove moderator role from" : "Make"} ${participantName} ${participant.role === "MODERATOR" ? "" : "moderator"}`}>{participant.role === "MODERATOR" ? "Demote" : "Mod"}</button><button type="button" onClick={() => removeParticipant(participant.userId)} aria-label={`Remove ${participantName}`}>Remove</button></div>}</div>; })}</div><div className="request-hint"><span>↗</span><div><strong>Moderators can control playback</strong><p>Only the host can manage roles or remove participants.</p></div></div></div> : <div className="chat-content"><div className="sidebar-title"><h2>Room chat</h2><span>Live</span></div><div className="chat-messages" aria-live="polite">{chat.length === 0 && <p className="empty-chat">Say hello when everyone arrives.</p>}{chat.map((item) => <div className="chat-message" key={item.id || `${item.name}-${item.text}`}><strong>{item.name}</strong><p>{item.text}</p></div>)}</div><form className="chat-form" onSubmit={sendMessage}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a message..." maxLength={500} /><button type="submit" aria-label="Send message">↗</button></form></div>}
-                    <div className="sidebar-footer"><span className={`connection-dot ${connection !== "connected" ? "offline" : ""}`} /> {connection === "connected" ? "Connected as" : "Reconnecting"} <strong>{name}</strong></div>
-                </aside>
-            </section>
-            {toast && <div className="room-toast" role="status" aria-live="polite">{toast}</div>}
-            {showEndRoomPrompt && <div className="room-confirmation-backdrop" onClick={() => setShowEndRoomPrompt(false)}>
-                <section className="room-confirmation" role="dialog" aria-modal="true" aria-labelledby="end-room-title" onClick={(event) => event.stopPropagation()}>
-                    <button className="confirmation-close" type="button" aria-label="Close confirmation" onClick={() => setShowEndRoomPrompt(false)}>×</button>
-                    <span className="confirmation-icon">!</span>
-                    <p className="confirmation-kicker">End watch room</p>
-                    <h2 id="end-room-title">End this room for everyone?</h2>
-                    <p className="confirmation-copy">Everyone will be disconnected and this room link will no longer work.</p>
-                    <div className="confirmation-room"><span>ROOM</span><strong>{roomId || "..."}</strong></div>
-                    <div className="confirmation-actions">
-                        <button className="confirmation-cancel" type="button" onClick={() => setShowEndRoomPrompt(false)}>Keep room</button>
-                        <button className="confirmation-end" type="button" onClick={endRoom}>End room</button>
-                    </div>
-                </section>
-            </div>}
-        </main>
-    );
-}
+                {/* Top-Left Host Control Badge */}
+                <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${
+                  isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
+                }`}>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>You have host control</span>
+                </div>
 
-export default function RoomPage({ params }) {
-    return (
-        <Suspense fallback={<main className="room-loading">Opening room...</main>}>
-            <RoomContent params={params} />
-        </Suspense>
-    );
+                {/* Lightweight Instagram-Style Floating Reactions (Pure emoji, no heavy background or text) */}
+                <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
+                  {reactions.map((r) => (
+                    <div
+                      key={r.id}
+                      className="ig-reaction-bubble absolute pointer-events-none select-none text-2xl filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.5)]"
+                      style={{
+                        bottom: "18px",
+                        right: `${r.offsetRight || 24}px`,
+                      }}
+                    >
+                      {r.emoji}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Beside-the-Player Instant Reaction Rail */}
+              <aside className={`flex sm:flex-col items-center justify-between sm:justify-center gap-1.5 px-3 py-2 sm:px-2.5 sm:py-3.5 border rounded-2xl shadow-lg shrink-0 backdrop-blur-md transition-colors ${
+                isDark ? "bg-[#181818]/90 border-[#272727]" : "bg-white/95 border-[#E5E5E5]"
+              }`}>
+                <div className="hidden sm:flex flex-col items-center pb-2 border-b border-inherit w-full">
+                  <span className="text-[9px] uppercase tracking-wider font-bold opacity-50">React</span>
+                </div>
+
+                <div className="flex sm:flex-col items-center gap-1.5 w-full justify-around sm:justify-start">
+                  {[
+                    { emoji: "🔥", name: "Fire (1)" },
+                    { emoji: "❤️", name: "Love (2)" },
+                    { emoji: "👏", name: "Clap (3)" },
+                    { emoji: "😂", name: "Haha (4)" },
+                    { emoji: "⚡", name: "Hype (5)" },
+                    { emoji: "😮", name: "Woah (6)" },
+                  ].map((item) => (
+                    <button
+                      key={item.emoji}
+                      onClick={() => triggerReaction(item.emoji)}
+                      className="p-2 rounded-xl hover:scale-125 active:scale-90 transition-transform flex items-center justify-center select-none"
+                      title={item.name}
+                    >
+                      <span className="text-xl filter drop-shadow">{item.emoji}</span>
+                    </button>
+                  ))}
+                </div>
+              </aside>
+            </div>
+
+            {/* Playback Controls Bar */}
+            <div className={`playback-controls w-full border p-3 sm:p-3.5 rounded-2xl flex flex-col sm:flex-row items-center gap-3 sm:gap-4 shadow-lg transition-colors ${
+              isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
+            }`}>
+              {/* Timecode & Scrubber with #FF0000 Accent */}
+              <div className="flex-1 w-full flex items-center gap-3">
+                <div className="relative w-full flex items-center">
+                  <div className={`absolute left-0 right-0 h-1.5 rounded-full pointer-events-none overflow-hidden ${
+                    isDark ? "bg-[#272727]" : "bg-[#E5E5E5]"
+                  }`}>
+                    <div
+                      className="h-full bg-[#FF0000] transition-all"
+                      style={{ width: `${(currentTime / duration) * 100}%` }}
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={duration}
+                    value={currentTime}
+                    onChange={(e) => setCurrentTime(Number(e.target.value))}
+                    className="seek-slider relative z-10 w-full h-1.5 bg-transparent appearance-none cursor-pointer focus:outline-none accent-[#FF0000]"
+                  />
+                </div>
+
+                <span className="text-[11px] font-mono opacity-70 shrink-0 font-medium tracking-tight">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </span>
+              </div>
+
+              {/* Utility Buttons: Minimal Vertical Volume, Fullscreen, Change Video */}
+              <div className="playback-actions flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+                
+                {/* Minimal Vertical Volume Pop-up */}
+                <div
+                  className="relative flex items-center justify-center"
+                  onMouseEnter={() => setShowVolumePopup(true)}
+                  onMouseLeave={() => {
+                    if (!isDraggingVolRef.current) setShowVolumePopup(false);
+                  }}
+                >
+                  {/* Vertical Popup Capsule */}
+                  <div
+                    className={`absolute bottom-[calc(100%+12px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 px-2.5 py-3 rounded-2xl border backdrop-blur-2xl shadow-2xl transition-all duration-200 z-30 ${
+                      showVolumePopup
+                        ? "opacity-100 translate-y-0 pointer-events-auto"
+                        : "opacity-0 translate-y-2 pointer-events-none"
+                    } ${
+                      isDark ? "bg-[#181818]/95 border-[#272727] text-white" : "bg-white/95 border-[#E5E5E5] text-[#0F0F0F]"
+                    }`}
+                  >
+                    {/* Percentage readout */}
+                    <span className="text-[10px] font-mono font-bold tracking-tight select-none">
+                      {isMuted ? "0%" : `${volume}%`}
+                    </span>
+
+                    {/* Acoustic Vertical Track */}
+                    <div
+                      ref={customVolTrackRef}
+                      onMouseDown={(e) => {
+                        isDraggingVolRef.current = true;
+                        applyVolumeLevel(calculateVolumeFromY(e.clientY));
+                      }}
+                      onTouchStart={(e) => {
+                        isDraggingVolRef.current = true;
+                        if (e.touches.length > 0) applyVolumeLevel(calculateVolumeFromY(e.touches[0].clientY));
+                      }}
+                      className={`relative w-[5px] h-24 rounded-full cursor-pointer select-none ${
+                        isDark ? "bg-neutral-800" : "bg-neutral-200"
+                      }`}
+                      aria-label="Volume Track"
+                    >
+                      <div
+                        className="absolute bottom-0 left-0 right-0 rounded-full bg-gradient-to-t from-[#FF0000] to-[#FF3B30] shadow-[0_0_8px_rgba(255,0,0,0.45)] pointer-events-none"
+                        style={{ height: `${isMuted ? 0 : volume}%` }}
+                      />
+                      <div
+                        className="absolute left-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-[#FF0000] shadow-[0_0_8px_rgba(255,0,0,0.7)] -translate-x-1/2 translate-y-1/2 pointer-events-none"
+                        style={{ bottom: `${isMuted ? 0 : volume}%` }}
+                      />
+                    </div>
+
+                    <div
+                      className={`w-2 h-2 rotate-45 border-r border-b absolute -bottom-1 left-1/2 -translate-x-1/2 ${
+                        isDark ? "bg-[#181818] border-[#272727]" : "bg-white border-[#E5E5E5]"
+                      }`}
+                    />
+                  </div>
+
+                  {/* Speaker Button with Auto-Mute Icon Detection */}
+                  <button
+                    onClick={() => {
+                      if (isMuted) {
+                        setIsMuted(false);
+                        applyVolumeLevel(volume === 0 ? 80 : volume, true);
+                      } else {
+                        setIsMuted(true);
+                        showToastMsg("Muted");
+                      }
+                    }}
+                    className={`p-2.5 rounded-xl border transition text-xs font-semibold ${
+                      isDark
+                        ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
+                        : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
+                    }`}
+                    title={isMuted ? "Unmute" : "Mute"}
+                  >
+                    {isMuted || volume === 0 ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                      </svg>
+                    ) : volume < 50 ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+
+                {/* Fullscreen Button */}
+                <button
+                  onClick={() => showToastMsg("Fullscreen mode toggled")}
+                  className={`p-2.5 rounded-xl border transition text-xs ${
+                    isDark
+                      ? "bg-[#272727] hover:bg-[#333333] border-[#333333] text-[#F1F1F1]"
+                      : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-[#0F0F0F]"
+                  }`}
+                  title="Fullscreen"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
+
+                {/* Change Video Action Pill */}
+                <button
+                  onClick={() => setShowVideoModal(true)}
+                  className={`px-3.5 py-2 rounded-xl border text-xs font-semibold tracking-tight transition active:scale-95 flex items-center gap-2 group shadow-sm ${
+                    isDark
+                      ? "bg-[#272727] hover:bg-[#333333] text-[#F1F1F1] border-[#383838]"
+                      : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F] border-[#E5E5E5]"
+                  }`}
+                >
+                  <span className="w-4 h-4 rounded-full bg-[#FF0000] text-white flex items-center justify-center shrink-0 shadow-[0_0_8px_rgba(255,0,0,0.5)]">
+                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </span>
+                  <span className="tracking-wide">Change Video</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Right Column: Sidebar locked to match video column height */}
+          <aside className={`room-sidebar w-full rounded-2xl md:rounded-3xl border flex flex-col h-full min-h-[460px] overflow-hidden transition-colors shadow-lg ${
+            isDark ? "bg-[#141414] border-[#272727]" : "bg-white border-[#E5E5E5]"
+          }`}>
+            {/* 1/3 Segmented Tab Capsule */}
+            <div className="p-3 border-b border-inherit shrink-0">
+              <div className={`relative flex items-center p-1 border rounded-2xl shadow-inner select-none ${
+                isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F2F2F2] border-[#E5E5E5]"
+              }`}>
+                {/* Fluid Sliding Glider Pill */}
+                <div
+                  className={`absolute rounded-xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-sm pointer-events-none ${
+                    isDark ? "bg-[#272727]" : "bg-white"
+                  }`}
+                  style={{
+                    width: "calc((100% - 8px) / 3)",
+                    top: "4px",
+                    bottom: "4px",
+                    left:
+                      currentTab === "chat"
+                        ? "4px"
+                        : currentTab === "audience"
+                        ? "calc(4px + (100% - 8px) / 3)"
+                        : "calc(4px + ((100% - 8px) / 3) * 2)",
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab("chat")}
+                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center focus:outline-none ${
+                    currentTab === "chat"
+                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
+                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
+                  }`}
+                >
+                  Live Chat
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab("audience")}
+                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center gap-1.5 focus:outline-none ${
+                    currentTab === "audience"
+                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
+                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
+                  }`}
+                >
+                  <span>Audience</span>
+                  <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none shrink-0 transition-colors ${
+                    currentTab === "audience"
+                      ? isDark
+                        ? "bg-[#181818] text-white"
+                        : "bg-[#E5E5E5] text-black"
+                      : isDark
+                      ? "bg-[#272727] text-neutral-400"
+                      : "bg-[#E5E5E5] text-neutral-600"
+                  }`}>
+                    3
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab("queue")}
+                  className={`flex-1 relative z-10 py-2 px-2 text-xs rounded-xl transition-colors duration-200 flex items-center justify-center gap-1.5 focus:outline-none ${
+                    currentTab === "queue"
+                      ? isDark ? "font-semibold text-white" : "font-semibold text-[#0F0F0F]"
+                      : isDark ? "font-medium text-neutral-400 hover:text-white" : "font-medium text-neutral-500 hover:text-black"
+                  }`}
+                >
+                  <span>Queue</span>
+                  <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none shrink-0 transition-colors ${
+                    currentTab === "queue"
+                      ? isDark
+                        ? "bg-[#181818] text-white"
+                        : "bg-[#E5E5E5] text-black"
+                      : isDark
+                      ? "bg-[#272727] text-neutral-400"
+                      : "bg-[#E5E5E5] text-neutral-600"
+                  }`}>
+                    3
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Pane 1: Live Chat Pane (Input strictly encapsulated here) */}
+            {currentTab === "chat" && (
+              <div className="room-sidebar-pane flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div className="room-sidebar-scroll flex-1 overflow-y-auto p-3.5 space-y-3">
+                  {chatMessages.map((msg) => (
+                    <div key={msg.id} className="flex flex-col text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
+                          {msg.name}
+                        </span>
+                        {msg.badge && (
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${
+                            isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
+                          }`}>
+                            {msg.badge}
+                          </span>
+                        )}
+                        {msg.time && <span className="text-[10px] opacity-40">{msg.time}</span>}
+                      </div>
+                      <p className={`border rounded-2xl px-3.5 py-2 mt-0.5 self-start break-words max-w-[90%] shadow-sm text-xs ${
+                        msg.isSystem
+                          ? isDark
+                            ? "bg-[#181818] border-[#272727] text-neutral-400"
+                            : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
+                          : isDark
+                          ? "bg-[#181818] border-[#272727] text-neutral-200"
+                          : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
+                      }`}>
+                        {msg.text}
+                      </p>
+                    </div>
+                  ))}
+                  <div ref={chatAnchorRef} />
+                </div>
+
+                {/* Chat Form: Lives ONLY in chat pane */}
+                <form
+                  onSubmit={handleSendMessage}
+                  className={`room-sidebar-footer p-3 border-t shrink-0 ${
+                    isDark ? "bg-[#111111] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                  }`}
+                >
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Send message to room..."
+                      maxLength={250}
+                      className={`w-full border rounded-xl pl-3.5 pr-11 py-2.5 text-xs focus:outline-none focus:border-[#FF0000] transition ${
+                        isDark
+                          ? "bg-[#181818] border-[#272727] text-white placeholder-neutral-500"
+                          : "bg-white border-[#E5E5E5] text-[#0F0F0F] placeholder-neutral-400"
+                      }`}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                      className={`absolute right-2 p-1.5 rounded-lg transition active:scale-95 shadow-sm disabled:opacity-40 ${
+                        isDark ? "bg-[#F1F1F1] hover:bg-white text-[#0F0F0F]" : "bg-[#0F0F0F] hover:bg-black text-white"
+                      }`}
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Pane 2: Audience Pane (Fills vertical height cleanly, NO chat input) */}
+            {currentTab === "audience" && (
+              <div className="room-sidebar-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
+                <div className="room-sidebar-scroll space-y-2.5 overflow-y-auto min-h-0">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-inherit">
+                    <span className="text-xs font-bold">Room Members</span>
+                    <span className="text-[11px] opacity-50 font-mono">3 / 50 Active</span>
+                  </div>
+
+                  {/* Host Card */}
+                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
+                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
+                        isDark ? "bg-[#272727] border-[#383838] text-white" : "bg-neutral-200 border-neutral-300 text-black"
+                      }`}>
+                        Y
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold">You (Host)</p>
+                        <span className="text-[10px] text-neutral-400 font-mono font-medium tracking-wider">ROOM CREATOR</span>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${
+                      isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                    }`}>
+                      YOU
+                    </span>
+                  </div>
+
+                  {/* Moderator Card */}
+                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
+                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
+                        isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                      }`}>
+                        M
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold">Maya</p>
+                        <span className="text-[10px] opacity-60 font-mono">MODERATOR</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => showToastMsg("Maya was demoted")}
+                      className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
+                        isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
+                      }`}
+                    >
+                      Demote
+                    </button>
+                  </div>
+
+                  {/* Participant Card */}
+                  <div className={`flex items-center justify-between p-3 rounded-2xl border ${
+                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`relative w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs ${
+                        isDark ? "bg-[#272727] border-[#333] text-neutral-200" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"
+                      }`}>
+                        L
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#181818]"></span>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold">Liam</p>
+                        <span className="text-[10px] opacity-60 font-mono">VIEWER</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => showToastMsg("Liam promoted to Moderator")}
+                        className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${
+                          isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"
+                        }`}
+                      >
+                        Mod
+                      </button>
+                      <button
+                        onClick={() => showToastMsg("Liam was kicked")}
+                        className="px-2.5 py-1 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-[11px] rounded-lg transition font-medium"
+                      >
+                        Kick
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom: Compact host permissions */}
+                <div className="room-sidebar-footer pt-1.5 border-t border-inherit shrink-0">
+                  <div className={`p-1.5 rounded-md border ${
+                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F2F2F2] border-[#E5E5E5]"
+                  }`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#FF0000] block"></span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider">Host Permissions</span>
+                    </div>
+                    <p className="mt-1 text-[9px] opacity-70 leading-[1.2]">
+                      You and designated moderators have playback scrubbing, video changing, and room queue permissions.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pane 3: Queue Pane (Fills vertical height cleanly, NO chat input) */}
+            {currentTab === "queue" && (
+              <div className="room-sidebar-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
+                <div className="room-sidebar-scroll space-y-3 overflow-y-auto min-h-0">
+                  <div className={`p-3.5 rounded-2xl border space-y-2 ${
+                    isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold font-mono tracking-wider opacity-60 uppercase flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Now Synchronized
+                      </span>
+                      <span className="text-[11px] font-mono opacity-60 font-medium">LIVE</span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold leading-snug">Lofi Girl — Beats to relax/study to</p>
+                      <p className="text-[11px] opacity-60 mt-0.5">Streaming via YouTube 4K Sync</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pb-1 border-b border-inherit">
+                    <span className="text-xs font-bold">Up Next</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-4 h-4 rounded-full text-[10px] font-mono font-medium flex items-center justify-center leading-none ${
+                        isDark ? "bg-[#272727] text-white" : "bg-[#E5E5E5] text-black"
+                      }`}>
+                        3
+                      </span>
+                      <span className="text-[11px] opacity-60 font-medium">tracks queued</span>
+                    </div>
+                  </div>
+
+                  {queueList.map((track) => (
+                    <div
+                      key={track.id}
+                      className={`p-3 rounded-2xl border flex items-center justify-between ${
+                        isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-semibold">{track.title}</p>
+                        <span className="text-[10px] opacity-60">{track.req}</span>
+                      </div>
+                      <span className={`w-5 h-5 rounded-full border text-[10px] font-mono font-bold flex items-center justify-center shrink-0 ${
+                        isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-700"
+                      }`}>
+                        {track.id}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="room-sidebar-footer pt-3 border-t border-inherit space-y-2 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold">Queue Next Video</span>
+                    <span className="text-[10px] opacity-60 font-medium">Autoplay On</span>
+                  </div>
+                  <button
+                    onClick={() => setShowVideoModal(true)}
+                    className={`w-full py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm ${
+                      isDark
+                        ? "bg-[#181818] hover:bg-[#222222] border-[#272727] text-white"
+                        : "bg-[#F2F2F2] hover:bg-[#E5E5E5] border-[#E5E5E5] text-black"
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded-full bg-[#FF0000] text-white flex items-center justify-center text-[11px] font-black">+</span>
+                    <span>Add YouTube Link to Queue</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      </main>
+
+      {/* Change Video Modal */}
+      {showVideoModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`max-w-md w-full border p-6 rounded-3xl space-y-4 shadow-2xl transition-colors ${
+            isDark ? "bg-[#181818] border-[#272727] text-white" : "bg-white border-[#E5E5E5] text-[#0F0F0F]"
+          }`}>
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-bold tracking-tight">Queue YouTube Video</h3>
+                <p className="text-xs opacity-60 mt-0.5">Stream any public, live, or unlisted YouTube link.</p>
+              </div>
+              <button
+                onClick={() => setShowVideoModal(false)}
+                className="opacity-60 hover:opacity-100 p-1 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleLoadVideo} className="space-y-4">
+              <input
+                type="text"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="Paste URL (e.g. youtube.com/watch?v=...)"
+                autoFocus
+                className={`w-full border px-3.5 py-2.5 rounded-xl text-xs focus:outline-none focus:border-[#FF0000] transition ${
+                  isDark
+                    ? "bg-[#0F0F0F] border-[#272727] text-white placeholder-neutral-500"
+                    : "bg-[#F8F8F9] border-[#E5E5E5] text-black placeholder-neutral-400"
+                }`}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowVideoModal(false)}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+                    isDark ? "bg-[#272727] hover:bg-[#333] text-[#F1F1F1]" : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F]"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-md ${
+                    isDark ? "bg-[#F1F1F1] hover:bg-white text-[#0F0F0F]" : "bg-[#0F0F0F] hover:bg-black text-white"
+                  }`}
+                >
+                  Load & Sync →
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* End Room Modal */}
+      {showEndModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`max-w-sm w-full border p-6 rounded-3xl space-y-4 text-center shadow-2xl transition-colors ${
+            isDark ? "bg-[#181818] border-[#272727] text-white" : "bg-white border-[#E5E5E5] text-[#0F0F0F]"
+          }`}>
+            <div className="w-12 h-12 rounded-2xl bg-[#FF0000]/10 text-[#FF0000] mx-auto flex items-center justify-center text-xl font-bold border border-[#FF0000]/30">
+              !
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold">End Session for Everyone?</h3>
+              <p className="text-xs opacity-60">All current participants will be disconnected immediately.</p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowEndModal(false)}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-semibold transition ${
+                  isDark ? "bg-[#272727] hover:bg-[#333] text-[#F1F1F1]" : "bg-[#F2F2F2] hover:bg-[#E5E5E5] text-[#0F0F0F]"
+                }`}
+              >
+                Stay
+              </button>
+              <button
+                onClick={() => {
+                  setShowEndModal(false);
+                  showToastMsg("Room has ended.");
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-[#FF0000] hover:bg-red-600 text-xs font-bold text-white transition shadow-lg shadow-red-600/30"
+              >
+                End Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
 }

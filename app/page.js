@@ -62,7 +62,7 @@ export default function Home() {
         }
         const code = mode === "create" ? makeRoomCode() : cleanCode;
         const sessionId = mode === "create" ? crypto.randomUUID() : undefined;
-        window.sessionStorage.setItem("watchsync-pending-join", JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
+        window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
         setLinkCopied(false);
         setCodeCopied(false);
         setReadyRoom({ code, name: cleanName });
