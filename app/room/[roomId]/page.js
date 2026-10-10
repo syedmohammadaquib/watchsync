@@ -3,6 +3,7 @@
 import React, { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createWatchSyncSocket } from "@/lib/socket";
+import ThemeToggle from "@/components/theme-toggle";
 
 function extractYouTubeVideoId(value) {
   const input = value.trim();
@@ -151,16 +152,12 @@ function RoomPage() {
         return () => { cancelled = true; };
       }
       setShowJoinPrompt(false);
-      if (!roomIdentity.sessionId) roomIdentity.sessionId = window.crypto.randomUUID();
       window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify(roomIdentity));
       socket = createWatchSyncSocket();
       socketRef.current = socket;
 
       const joinRoom = () => socket.emit("join_room", {
         roomId,
-        username: roomIdentity.name,
-        mode: roomIdentity.mode,
-        sessionId: roomIdentity.sessionId,
       });
       const onConnect = () => {
         if (cancelled) return;
@@ -255,7 +252,6 @@ function RoomPage() {
 
       return () => {
         cancelled = true;
-        socket.emit("leave_room");
         socket.disconnect();
         if (socketRef.current === socket) socketRef.current = null;
       };
@@ -266,18 +262,33 @@ function RoomPage() {
     }
   }, [roomId, router, identity]);
 
-  const submitJoinPrompt = (event) => {
+  const submitJoinPrompt = async (event) => {
     event.preventDefault();
     const name = joinName.trim().slice(0, 32);
     if (!name) {
       setJoinPromptError("Enter your display name to join this room.");
       return;
     }
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000"}/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ roomId, name, mode: "join" }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok) {
+        setJoinPromptError(result?.message || "That room could not be joined.");
+        return;
+      }
+    } catch {
+      setJoinPromptError("The realtime service is unavailable. Please try again shortly.");
+      return;
+    }
     const roomIdentity = {
       roomId,
       name,
       mode: "join",
-      sessionId: window.crypto.randomUUID(),
     };
     window.sessionStorage.setItem(`watchsync-room-${roomId}`, JSON.stringify(roomIdentity));
     setJoinPromptError("");
@@ -611,25 +622,18 @@ function RoomPage() {
         {/* Right: Header Actions */}
         <div className="flex items-center gap-2 sm:gap-2.5">
           {/* Dark / Light Theme Toggle */}
-          <button
-            onClick={() => {
-              setIsDark(!isDark);
-              showToastMsg(!isDark ? "Dark mode activated" : "Light mode activated");
-            }}
-            className="room-header-icon-button"
-            title="Toggle theme"
-          >
-            {isDark ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-                <path d="M12 3a9 9 0 000 18V3z" fill="currentColor" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            )}
-          </button>
+          <div className={`exact-${isDark ? "dark" : "light"} room-theme-scope`}>
+            <div className="exact-tools">
+              <ThemeToggle
+                selectedTheme={isDark ? "dark" : "light"}
+                defaultTheme={isDark ? "dark" : "light"}
+                onThemeChange={(nextTheme) => {
+                  setIsDark(nextTheme === "dark");
+                  showToastMsg(nextTheme === "dark" ? "Dark mode activated" : "Light mode activated");
+                }}
+              />
+            </div>
+          </div>
 
           {/* Copy Link Button */}
           <button
@@ -839,7 +843,7 @@ function RoomPage() {
                     </svg>
                   ) : (
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path d="M8 5.25v13.5L19 12 8 5.25z" />
+                      <path d="M6.5 3v18l15-9-15-9z" />
                     </svg>
                   )}
                 </button>

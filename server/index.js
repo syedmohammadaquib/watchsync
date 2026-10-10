@@ -3,22 +3,91 @@ import cors from "cors";
 import express from "express";
 import http from "node:http";
 import { Server } from "socket.io";
-import { createPersistentRoom, endPersistentRoom, initializeDatabase, isActiveRoom, loadPersistentRoom, savePersistentRoom } from "./db.js";
+import {
+    cleanupExpiredRooms,
+    createRoomSession,
+    endPersistentRoom,
+    getRoomMembership,
+    getSessionByToken,
+    initializeDatabase,
+    isActiveRoom,
+    loadPersistentRoom,
+    markMemberConnected,
+    savePersistentRoom,
+    updateMemberRole,
+} from "./db.js";
 
 const port = Number(process.env.PORT || 4000);
-const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+const isAllowedOrigin = (origin, callback) => {
+    callback(null, !origin || clientOrigins.includes(origin));
+};
 const rooms = new Map();
 const roomLoadPromises = new Map();
-const emptyRoomTimers = new Map();
-const EMPTY_ROOM_GRACE_MS = 15000;
+const hostDisconnectTimers = new Map();
+const HOST_GRACE_MS = 45000;
+const SESSION_COOKIE = "watchsync_active_session";
 
 const app = express();
-app.use(cors({ origin: clientOrigin }));
+app.use(cors({ origin: isAllowedOrigin, credentials: true }));
+app.use(express.json({ limit: "16kb" }));
 app.get("/health", (_request, response) => response.json({ status: "ok", service: "watchsync-realtime" }));
+app.post("/session", async (request, response) => {
+    const roomId = typeof request.body?.roomId === "string" ? request.body.roomId.trim().toUpperCase() : "";
+    const displayName = typeof request.body?.name === "string" ? request.body.name.trim().slice(0, 32) : "";
+    const mode = request.body?.mode === "create" ? "create" : "join";
+    if (!/^[A-Z0-9]{4,12}$/.test(roomId) || !displayName) {
+        response.status(400).json({ ok: false, message: "A valid room code and display name are required." });
+        return;
+    }
+    try {
+        const rawCookie = request.headers.cookie?.split(";")
+            .map((entry) => entry.trim())
+            .find((entry) => entry.startsWith(`${SESSION_COOKIE}=`));
+        const existingToken = rawCookie ? decodeURIComponent(rawCookie.slice(SESSION_COOKIE.length + 1)) : "";
+        const session = await createRoomSession({ roomId, displayName, mode, existingToken });
+        response.cookie(SESSION_COOKIE, session.token, {
+            httpOnly: true,
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            secure: process.env.NODE_ENV === "production",
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/",
+        });
+        response.json({ ok: true, roomId });
+    } catch (error) {
+        const missing = error.message === "That watch room does not exist.";
+        response.status(missing ? 404 : 409).json({
+            ok: false,
+            message: missing ? error.message : "The room could not be prepared. Please try again.",
+        });
+    }
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: clientOrigin, methods: ["GET", "POST"] },
+    cors: { origin: isAllowedOrigin, methods: ["GET", "POST"], credentials: true },
+});
+
+io.use(async (socket, next) => {
+    try {
+        const rawCookie = socket.handshake.headers.cookie?.split(";")
+            .map((entry) => entry.trim())
+            .find((entry) => entry.startsWith(`${SESSION_COOKIE}=`));
+        const token = rawCookie ? decodeURIComponent(rawCookie.slice(SESSION_COOKIE.length + 1)) : "";
+        const session = token ? await getSessionByToken(token) : null;
+        if (!session) {
+            next(new Error("A valid WatchSync session is required."));
+            return;
+        }
+        socket.data.sessionId = session.session_id;
+        next();
+    } catch (error) {
+        console.error("Unable to authenticate Socket.IO handshake", error);
+        next(new Error("The realtime session could not be verified."));
+    }
 });
 
 function createRoom(roomId) {
@@ -56,8 +125,8 @@ async function loadRoom(roomId) {
 
 function persistRoom(roomId) {
     const room = rooms.get(roomId);
-    if (!room) return;
-    savePersistentRoom(roomId, room).catch((error) => console.error("Unable to persist room state", error));
+    if (!room) return Promise.resolve();
+    return savePersistentRoom(roomId, room);
 }
 
 function publicRoom(room) {
@@ -71,25 +140,27 @@ function canControlPlayback(participant) {
     return participant?.role === "HOST" || participant?.role === "MODERATOR";
 }
 
-function clearEmptyRoomTimer(roomId) {
-    clearTimeout(emptyRoomTimers.get(roomId));
-    emptyRoomTimers.delete(roomId);
+function clearHostDisconnectTimer(roomId) {
+    clearTimeout(hostDisconnectTimers.get(roomId));
+    hostDisconnectTimers.delete(roomId);
 }
 
-function scheduleEmptyRoomCleanup(roomId) {
-    if (emptyRoomTimers.has(roomId)) return;
-    emptyRoomTimers.set(roomId, setTimeout(() => {
-        emptyRoomTimers.delete(roomId);
+function scheduleHostDisconnectCleanup(roomId) {
+    if (hostDisconnectTimers.has(roomId)) return;
+    hostDisconnectTimers.set(roomId, setTimeout(() => {
+        hostDisconnectTimers.delete(roomId);
         const room = rooms.get(roomId);
-        if (room && room.participants.size === 0) endRoom(roomId, "ROOM_EMPTY");
-    }, EMPTY_ROOM_GRACE_MS));
+        if (room && ![...room.participants.values()].some((participant) => participant.role === "HOST")) {
+            endRoom(roomId, "HOST_TIMEOUT");
+        }
+    }, HOST_GRACE_MS));
 }
 
 async function endRoom(roomId, reason) {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    clearEmptyRoomTimer(roomId);
+    clearHostDisconnectTimer(roomId);
     try {
         await endPersistentRoom(roomId);
     } catch (error) {
@@ -108,80 +179,28 @@ async function endRoom(roomId, reason) {
 }
 
 io.on("connection", (socket) => {
-    socket.on("check_room", async ({ roomId } = {}, acknowledge) => {
+    socket.on("join_room", async ({ roomId } = {}) => {
         try {
             const cleanRoomId = typeof roomId === "string" ? roomId.trim().toUpperCase() : "";
-            if (cleanRoomId && await isActiveRoom(cleanRoomId)) {
-                acknowledge?.({ ok: true });
-                socket.emit("room_available");
-            } else {
-                acknowledge?.({ ok: false, message: "That watch room does not exist. Check the room code and try again." });
-                socket.emit("room_not_found", { code: "ROOM_NOT_FOUND", message: "That watch room does not exist." });
-            }
-        } catch (error) {
-            console.error("Unable to check room", error);
-            acknowledge?.({ ok: false, message: "The room could not be checked. Please try again." });
-            socket.emit("room_error", { code: "ROOM_CHECK_FAILED", message: "The room could not be checked." });
-        }
-    });
-
-    socket.on("create_room", async ({ roomId, sessionId } = {}, acknowledge) => {
-        try {
-            const cleanRoomId = typeof roomId === "string" ? roomId.trim().toUpperCase() : "";
-            if (!/^[A-Z0-9]{4,12}$/.test(cleanRoomId) || typeof sessionId !== "string" || sessionId.length < 16) {
-                acknowledge?.({ ok: false, message: "A valid room code and session are required." });
-                socket.emit("room_error", { code: "INVALID_ROOM", message: "A room code is required." });
-                return;
-            }
-            const room = await loadRoom(cleanRoomId);
-            clearEmptyRoomTimer(cleanRoomId);
-            if (room.hostSessionId && room.hostSessionId !== sessionId) {
-                acknowledge?.({ ok: false, message: "That room code is already in use. Please create the room again." });
-                socket.emit("room_error", { code: "FORBIDDEN", message: "This room already has a host." });
-                return;
-            }
-            await createPersistentRoom(cleanRoomId, sessionId);
-            room.hostSessionId = sessionId || room.hostSessionId;
-            socket.data.createdRoomId = cleanRoomId;
-            socket.data.hostSessionId = sessionId;
-            persistRoom(cleanRoomId);
-            acknowledge?.({ ok: true });
-            socket.emit("room_available", { mode: "create" });
-        } catch (error) {
-            console.error("Unable to create room", error);
-            acknowledge?.({ ok: false, message: "The room could not be created. Please try again." });
-            socket.emit("room_error", { code: "ROOM_CREATE_FAILED", message: "The room could not be created." });
-        }
-    });
-
-    socket.on("join_room", async ({ roomId, username, mode, sessionId }) => {
-        try {
-            const cleanRoomId = typeof roomId === "string" ? roomId.trim().toUpperCase() : "";
-            const cleanName = typeof username === "string" ? username.trim().slice(0, 32) : "";
-            if (!cleanRoomId || !cleanName || typeof sessionId !== "string" || sessionId.length < 16) {
+            if (!cleanRoomId) {
                 socket.emit("room_error", { code: "INVALID_JOIN", message: "Room details are required." });
                 return;
             }
-            roomId = cleanRoomId;
-            username = cleanName;
             if (!(await isActiveRoom(roomId))) {
                 socket.emit("room_not_found", { code: "ROOM_NOT_FOUND", message: "That watch room does not exist." });
                 return;
             }
             const room = await loadRoom(roomId);
-            if (mode === "create" && socket.data.createdRoomId !== roomId) {
-                if (room.hostSessionId !== sessionId) {
-                    socket.emit("room_error", { code: "FORBIDDEN", message: "Create the room from the home page first." });
-                    return;
-                }
+            const membership = await getRoomMembership(roomId, socket.data.sessionId);
+            if (!membership) {
+                socket.emit("room_error", { code: "FORBIDDEN", message: "This session is not a member of the room." });
+                return;
             }
-            const role = mode === "create" && room.hostSessionId === sessionId
-                ? "HOST"
-                : room.rolesBySession.get(sessionId) || "PARTICIPANT";
-            const participant = { userId: socket.id, username: String(username).trim().slice(0, 32), role };
+            const role = membership.role;
+            const participant = { userId: socket.id, username: membership.display_name, role };
             for (const [existingSocketId] of room.participants) {
                 const existingSocket = io.sockets.sockets.get(existingSocketId);
-                if (existingSocketId !== socket.id && existingSocket?.data.sessionId === sessionId) {
+                if (existingSocketId !== socket.id && existingSocket?.data.sessionId === socket.data.sessionId) {
                     room.participants.delete(existingSocketId);
                     existingSocket.data.roomId = null;
                     existingSocket.leave(roomId);
@@ -190,13 +209,10 @@ io.on("connection", (socket) => {
             }
             socket.join(roomId);
             socket.data.roomId = roomId;
-            socket.data.hostSessionId = sessionId;
-            socket.data.role = role;
-            socket.data.sessionId = sessionId;
-            clearEmptyRoomTimer(roomId);
-            if (sessionId) room.rolesBySession.set(sessionId, role);
+            clearHostDisconnectTimer(roomId);
+            await markMemberConnected(roomId, socket.data.sessionId, true);
             room.participants.set(socket.id, participant);
-            persistRoom(roomId);
+            await persistRoom(roomId);
             socket.emit("sync_state", { ...publicRoom(room), selfRole: role, selfUserId: socket.id });
             io.to(roomId).emit("user_joined", { participants: [...room.participants.values()] });
         } catch (error) {
@@ -205,7 +221,7 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("send_message", ({ text } = {}) => {
+    socket.on("send_message", async ({ text } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -221,11 +237,17 @@ io.on("connection", (socket) => {
         };
         room.messages.push(chatMessage);
         if (room.messages.length > 100) room.messages.shift();
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist chat message", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The message could not be saved." });
+            return;
+        }
         io.to(roomId).emit("new_message", chatMessage);
     });
 
-    socket.on("set_video", ({ videoId } = {}) => {
+    socket.on("set_video", async ({ videoId } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -234,11 +256,17 @@ io.on("connection", (socket) => {
         room.state.playState = "paused";
         room.state.currentTime = 0;
         room.state.updatedAt = Date.now();
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist video change", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The video change could not be saved." });
+            return;
+        }
         io.to(roomId).emit("video_updated", { videoId, currentTime: 0, playState: "paused" });
     });
 
-    socket.on("playback_action", ({ action, currentTime } = {}) => {
+    socket.on("playback_action", async ({ action, currentTime } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -248,7 +276,13 @@ io.on("connection", (socket) => {
         room.state.playState = action === "seek" ? room.state.playState : action === "play" ? "playing" : "paused";
         room.state.currentTime = nextTime;
         room.state.updatedAt = Date.now();
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist playback action", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The playback change could not be saved." });
+            return;
+        }
         socket.broadcast.to(roomId).emit("playback_updated", {
             action,
             currentTime: nextTime,
@@ -256,7 +290,7 @@ io.on("connection", (socket) => {
         });
     });
 
-    socket.on("assign_role", ({ userId, role } = {}) => {
+    socket.on("assign_role", async ({ userId, role } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const actor = room?.participants.get(socket.id);
@@ -267,7 +301,14 @@ io.on("connection", (socket) => {
         const targetSocket = io.sockets.sockets.get(userId);
         if (targetSocket) targetSocket.data.role = role;
         if (targetSocket?.data.sessionId) room.rolesBySession.set(targetSocket.data.sessionId, role);
-        persistRoom(roomId);
+        try {
+            await updateMemberRole(roomId, targetSocket.data.sessionId, role);
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist role change", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The role change could not be saved." });
+            return;
+        }
         io.to(roomId).emit("role_assigned", {
             userId: target.userId,
             username: target.username,
@@ -276,7 +317,7 @@ io.on("connection", (socket) => {
         });
     });
 
-    socket.on("remove_participant", ({ userId } = {}) => {
+    socket.on("remove_participant", async ({ userId } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const actor = room?.participants.get(socket.id);
@@ -286,7 +327,14 @@ io.on("connection", (socket) => {
         room.participants.delete(userId);
         const targetSocket = io.sockets.sockets.get(userId);
         if (targetSocket?.data.sessionId) room.rolesBySession.delete(targetSocket.data.sessionId);
-        persistRoom(roomId);
+        try {
+            await markMemberConnected(roomId, targetSocket?.data.sessionId, false);
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist participant removal", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The participant could not be removed." });
+            return;
+        }
         targetSocket?.emit("participant_removed", { userId, reason: "REMOVED_BY_HOST" });
         if (targetSocket) targetSocket.data.roomId = null;
         targetSocket?.leave(roomId);
@@ -294,7 +342,7 @@ io.on("connection", (socket) => {
         io.to(roomId).emit("user_left", { participants: [...room.participants.values()] });
     });
 
-    socket.on("queue_add", ({ videoId } = {}) => {
+    socket.on("queue_add", async ({ videoId } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -307,11 +355,17 @@ io.on("connection", (socket) => {
             requestedById: socket.id,
             addedAt: Date.now(),
         });
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist queue item", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The queue item could not be saved." });
+            return;
+        }
         io.to(roomId).emit("queue_updated", { queue: room.queue });
     });
 
-    socket.on("queue_remove", ({ itemId } = {}) => {
+    socket.on("queue_remove", async ({ itemId } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -319,11 +373,17 @@ io.on("connection", (socket) => {
         if (!room || !participant || !item) return;
         if (!canControlPlayback(participant) && item.requestedById !== socket.id) return;
         room.queue = room.queue.filter((entry) => entry.id !== itemId);
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist queue removal", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The queue item could not be removed." });
+            return;
+        }
         io.to(roomId).emit("queue_updated", { queue: room.queue });
     });
 
-    socket.on("queue_play", ({ itemId } = {}) => {
+    socket.on("queue_play", async ({ itemId } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
         const participant = room?.participants.get(socket.id);
@@ -334,7 +394,13 @@ io.on("connection", (socket) => {
         room.state.currentTime = 0;
         room.state.updatedAt = Date.now();
         room.queue = room.queue.filter((entry) => entry.id !== itemId);
-        persistRoom(roomId);
+        try {
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist queue playback", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The queued video could not be started." });
+            return;
+        }
         io.to(roomId).emit("video_updated", { videoId: item.videoId, currentTime: 0, playState: "playing" });
         io.to(roomId).emit("queue_updated", { queue: room.queue });
     });
@@ -360,10 +426,8 @@ io.on("connection", (socket) => {
         room?.participants.delete(socket.id);
         socket.leave(roomId);
         socket.data.roomId = null;
-        if (room) {
-            io.to(roomId).emit("user_left", { participants: [...room.participants.values()] });
-            if (room.participants.size === 0) scheduleEmptyRoomCleanup(roomId);
-        }
+        markMemberConnected(roomId, socket.data.sessionId, false).catch((error) => console.error("Unable to update member state", error));
+        if (room) io.to(roomId).emit("user_left", { participants: [...room.participants.values()] });
     });
 
     socket.on("end_room", () => {
@@ -382,20 +446,28 @@ io.on("connection", (socket) => {
         const room = roomId && rooms.get(roomId);
         if (!room) return;
         const participant = room.participants.get(socket.id);
+        if (!participant) return;
         if (participant?.role === "HOST") {
             room.participants.delete(socket.id);
             io.to(roomId).emit("user_left", { participants: [...room.participants.values()] });
-            scheduleEmptyRoomCleanup(roomId);
+            markMemberConnected(roomId, socket.data.sessionId, false).catch((error) => console.error("Unable to update host state", error));
+            scheduleHostDisconnectCleanup(roomId);
             return;
         }
         room.participants.delete(socket.id);
+        markMemberConnected(roomId, socket.data.sessionId, false).catch((error) => console.error("Unable to update member state", error));
         io.to(roomId).emit("user_left", { participants: [...room.participants.values()] });
-        if (room.participants.size === 0) scheduleEmptyRoomCleanup(roomId);
     });
 });
 
 initializeDatabase()
-    .then(() => server.listen(port, () => console.log(`WatchSync realtime server listening on port ${port}`)))
+    .then(() => {
+        const cleanupTimer = setInterval(() => {
+            cleanupExpiredRooms().catch((error) => console.error("Unable to clean up expired rooms", error));
+        }, 15 * 60 * 1000);
+        cleanupTimer.unref();
+        return server.listen(port, () => console.log(`WatchSync realtime server listening on port ${port}`));
+    })
     .catch((error) => {
         console.error("Unable to initialize the room database", error);
         process.exitCode = 1;

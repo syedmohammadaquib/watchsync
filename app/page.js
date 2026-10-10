@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ThemeToggle, { useTheme } from "@/components/theme-toggle";
-import { createWatchSyncSocket } from "@/lib/socket";
 
 const videoData = [
     { title: "Lofi Hip Hop Radio - Beats to Relax / Study", tag: "LIVE", duration: "24/7", views: "28k watching", img: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=480&q=80" },
@@ -38,6 +37,8 @@ function getColumnPosters(column) {
     return column % 2 === 0 ? rotated : [...rotated].reverse();
 }
 
+const SERVER_WAKE_TIMEOUT_MS = 120000;
+
 export default function Home() {
     const router = useRouter();
     const theme = useTheme("dark");
@@ -49,14 +50,7 @@ export default function Home() {
     const [linkCopied, setLinkCopied] = useState(false);
     const [codeCopied, setCodeCopied] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-
-    useEffect(() => {
-        const requestedRoom = new URLSearchParams(window.location.search).get("room");
-        if (requestedRoom) {
-            setMode("join");
-            setRoomCode(requestedRoom.trim().toUpperCase());
-        }
-    }, []);
+    const [connectionStatus, setConnectionStatus] = useState("connecting");
 
     async function handleSubmit(event) {
         event.preventDefault();
@@ -72,37 +66,61 @@ export default function Home() {
             return;
         }
         const code = mode === "create" ? makeRoomCode() : cleanCode;
-        const sessionId = crypto.randomUUID();
         setIsSubmitting(true);
+        setConnectionStatus("connecting");
         setError("");
-        const socket = createWatchSyncSocket();
         try {
-            await new Promise((resolve, reject) => {
-                socket.once("connect", resolve);
-                socket.once("connect_error", reject);
-                socket.connect();
-            });
-            const response = await new Promise((resolve, reject) => {
-                socket.timeout(12000).emit(
-                    mode === "create" ? "create_room" : "check_room",
-                    mode === "create" ? { roomId: code, sessionId } : { roomId: code },
-                    (timeoutError, result) => {
-                        if (timeoutError) reject(new Error("The room service did not respond. Please try again."));
-                        else if (!result?.ok) reject(new Error(result?.message || "Unable to prepare this room."));
-                        else resolve(result);
-                    },
-                );
-            });
-            if (!response?.ok) throw new Error("Unable to prepare this room.");
-            window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode, sessionId }));
+            const deadline = Date.now() + SERVER_WAKE_TIMEOUT_MS;
+            let response;
+            let result;
+
+            while (!response) {
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) throw new Error("The server is taking longer than expected to start.");
+
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), remaining);
+                try {
+                    response = await fetch(`${process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000"}/session`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ roomId: code, name: cleanName, mode }),
+                        signal: controller.signal,
+                    });
+                } catch (requestError) {
+                    if (requestError.name === "AbortError") throw requestError;
+                    setConnectionStatus("waking");
+                    await new Promise((resolve) => window.setTimeout(resolve, Math.min(1500, Math.max(0, deadline - Date.now()))));
+                    continue;
+                } finally {
+                    window.clearTimeout(timeout);
+                }
+
+                if (response.status >= 500) {
+                    response = null;
+                    setConnectionStatus("waking");
+                    await new Promise((resolve) => window.setTimeout(resolve, Math.min(1500, Math.max(0, deadline - Date.now()))));
+                    continue;
+                }
+                result = await response.json().catch(() => null);
+            }
+
+            if (!response.ok || !result?.ok) {
+                if (response.status === 404 && mode === "join") throw new Error("Room not found.");
+                throw new Error(result?.message || "Unable to prepare this room.");
+            }
+            window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode }));
             setLinkCopied(false);
             setCodeCopied(false);
             setReadyRoom({ code, name: cleanName });
         } catch (requestError) {
-            setError(requestError.message || "The realtime service is unavailable. Please try again shortly.");
+            setError(requestError.name === "AbortError"
+                ? "Server is still starting. Please try again."
+                : requestError.message || "Unable to connect to the room.");
         } finally {
-            socket.disconnect();
             setIsSubmitting(false);
+            setConnectionStatus("connecting");
         }
     }
 
@@ -148,7 +166,10 @@ export default function Home() {
             <div className="exact-vignette" aria-hidden="true" />
             <div className="exact-main">
                 <nav className="exact-topbar" aria-label="Primary navigation">
-                    <div className="exact-brand"><span />watch<span>sync</span></div>
+                    <div className="exact-brand">
+                        <span className="exact-brand-mark" aria-hidden="true" />
+                        <span className="exact-brand-name"><span>watch</span><span>sync</span></span>
+                    </div>
                     <div className="exact-tools">
                         <div className="exact-live-counter"><i />Synchronized YouTube playback</div>
                         <ThemeToggle defaultTheme={theme} />
@@ -169,16 +190,21 @@ export default function Home() {
                         <div className="exact-panel-edge" />
                         <div className="exact-panel-heading"><p>SESSION SETUP</p><h2 id="panel-title">{mode === "create" ? "Create a room" : "Join a room"}</h2></div>
                         <div className="exact-mode-switch" role="tablist">
-                            <button className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setError(""); }} type="button">Create Room</button>
-                            <button className={mode === "join" ? "active" : ""} onClick={() => { setMode("join"); setError(""); }} type="button">Join Room</button>
+                            <button className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setRoomCode(""); setName(""); setError(""); }} type="button">Create Room</button>
+                            <button className={mode === "join" ? "active" : ""} onClick={() => { setMode("join"); setRoomCode(""); setName(""); setError(""); }} type="button">Join Room</button>
                         </div>
-                        <form onSubmit={handleSubmit}>
-                            {mode === "join" && <label>Room Code<input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="ENTER ROOM CODE" maxLength={8} autoCapitalize="characters" /></label>}
-                            <label>Your Display Name<input value={name} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder="e.g. Alex, Sarah..." maxLength={32} autoFocus /></label>
-                            {error && <p className="exact-error" role="alert">ⓘ <span>{error}</span></p>}
-                            <button className="exact-primary-action" type="submit" disabled={isSubmitting}>{isSubmitting ? "Connecting…" : mode === "create" ? "Create Watch Room" : "Enter Watch Room"} <span>→</span></button>
+                        <form onSubmit={handleSubmit} autoComplete="off">
+                            {mode === "join" && <label>Room Code<input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="ENTER ROOM CODE" maxLength={8} autoCapitalize="characters" autoComplete="off" /></label>}
+                            <label>Your Display Name<input value={name} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder="e.g. Alex, Sarah..." maxLength={32} autoComplete="off" /></label>
+                            <div className={`exact-action-group ${error ? "has-error" : ""} ${isSubmitting ? "is-connecting" : ""}`}>
+                                {error && <p className="exact-error" role="alert"><span className="exact-error-icon" aria-hidden="true">!</span><span>{error}</span></p>}
+                                {isSubmitting && <p className="exact-connection-status" role="status"><i />{connectionStatus === "waking" ? "Getting your room ready… This may take a moment." : "Connecting to the watch server…"}</p>}
+                                <button className={`exact-primary-action ${isSubmitting && connectionStatus === "waking" ? "is-waking" : ""}`} type="submit" disabled={isSubmitting}>
+                                    {isSubmitting ? connectionStatus === "waking" ? "Starting server" : "Connecting" : mode === "create" ? "Create Watch Room" : "Enter Watch Room"} <span className={isSubmitting ? "exact-loading-dots" : "exact-action-arrow"} aria-hidden="true">{isSubmitting ? "..." : <svg viewBox="0 0 24 24" focusable="false"><path d="M5 12h14M13 6l6 6-6 6" /></svg>}</span>
+                                </button>
+                            </div>
                         </form>
-                        <div className="exact-privacy"><span>🔒 Private &amp; encrypted link</span><span>No signup needed</span></div>
+                        <div className="exact-privacy"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10V7a4 4 0 0 1 8 0v3" /><rect x="5.5" y="10" width="13" height="10" rx="2.5" /><circle cx="12" cy="14.5" r="1.1" fill="currentColor" stroke="none" /><path d="M12 15.6v2.4" /></svg>Private &amp; encrypted link</span><span>No signup needed</span></div>
                     </section>
                 </section>
                 <footer className="exact-footer"><span><i />WATCH TOGETHER, FROM ANYWHERE</span><b /><span>WATCHSYNC © 2026</span></footer>
@@ -209,7 +235,7 @@ export default function Home() {
                         </button>
                     </div>
                     <div className="exact-modal-privacy">
-                        <span><i aria-hidden="true">⌁</i> Private &amp; encrypted</span>
+                        <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10V7a4 4 0 0 1 8 0v3" /><rect x="5.5" y="10" width="13" height="10" rx="2.5" /><circle cx="12" cy="14.5" r="1.1" fill="currentColor" stroke="none" /><path d="M12 15.6v2.4" /></svg>Private &amp; encrypted</span>
                         <span>No signup needed</span>
                     </div>
                 </section>
