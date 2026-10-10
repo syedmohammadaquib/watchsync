@@ -114,19 +114,14 @@ function RoomPage() {
 
     const updateCapsulePosition = () => {
       const tabsRect = tabs.getBoundingClientRect();
-      const contentRect = content.getBoundingClientRect();
-      const horizontalInset = 14;
-      const verticalInset = 8;
-      const contentRects = Object.values(roomTabContentRefs.current)
-        .filter(Boolean)
-        .map((node) => node.getBoundingClientRect());
-      const capsuleWidth = Math.max(...contentRects.map((rect) => rect.width)) + horizontalInset * 2;
-      const capsuleHeight = Math.max(...contentRects.map((rect) => rect.height)) + verticalInset * 2;
+      const tab = content.closest(".room-sidebar-tab");
+      if (!tab) return;
+      const tabRect = tab.getBoundingClientRect();
       setTabCapsuleStyle({
-        left: contentRect.left - tabsRect.left + contentRect.width / 2 - capsuleWidth / 2,
-        top: contentRect.top - tabsRect.top - verticalInset,
-        width: capsuleWidth,
-        height: capsuleHeight,
+        left: tabRect.left - tabsRect.left,
+        top: tabRect.top - tabsRect.top,
+        width: tabRect.width,
+        height: tabRect.height,
       });
     };
 
