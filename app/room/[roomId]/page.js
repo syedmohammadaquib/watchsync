@@ -98,39 +98,11 @@ function RoomPage() {
   const chatScrollRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const videoStageRef = useRef(null);
-  const roomTabsRef = useRef(null);
-  const roomTabContentRefs = useRef({});
-  const [tabCapsuleStyle, setTabCapsuleStyle] = useState({ left: 0, top: 0, width: 0, height: 0 });
 
   useEffect(() => {
     if (canStartVideo && currentTab === "queue") setCurrentTab("requests");
     if (!canStartVideo && (currentTab === "requests" || currentTab === "queue")) setCurrentTab("chat");
   }, [canStartVideo, currentTab]);
-
-  useLayoutEffect(() => {
-    const tabs = roomTabsRef.current;
-    const content = roomTabContentRefs.current[currentTab];
-    if (!tabs || !content) return;
-
-    const updateCapsulePosition = () => {
-      const tabsRect = tabs.getBoundingClientRect();
-      const tab = content.closest(".room-sidebar-tab");
-      if (!tab) return;
-      const tabRect = tab.getBoundingClientRect();
-      setTabCapsuleStyle({
-        left: tabRect.left - tabsRect.left,
-        top: tabRect.top - tabsRect.top,
-        width: tabRect.width,
-        height: tabRect.height,
-      });
-    };
-
-    updateCapsulePosition();
-    const observer = new ResizeObserver(updateCapsulePosition);
-    observer.observe(tabs);
-    Object.values(roomTabContentRefs.current).filter(Boolean).forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
-  }, [currentTab]);
 
   const showToastMsg = (msg) => {
     setToast(msg);
@@ -323,7 +295,7 @@ function RoomPage() {
         width: "100%",
         height: "100%",
         videoId: videoId || undefined,
-        playerVars: { controls: 0, cc_load_policy: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, enablejsapi: 1 },
+        playerVars: { controls: 0, cc_load_policy: 0, cc_lang_pref: 'none', disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, enablejsapi: 1, iv_load_policy: 3 },
         events: {
           onReady: (event) => {
             const roomState = initialRoomStateRef.current;
@@ -334,6 +306,10 @@ function RoomPage() {
               else event.target.pauseVideo();
             }
             setDuration(event.target.getDuration() || 0);
+            // Ensure captions are disabled
+            if (event.target.getOptions && event.target.getOptions().captions) {
+              event.target.setOption('captions', 'off');
+            }
           },
           onStateChange: (event) => {
             const playerState = YT.PlayerState;
@@ -373,6 +349,10 @@ function RoomPage() {
       // the viewer at the shared timestamp without starting playback.
       player.cueVideoById({ videoId, startSeconds });
       player.pauseVideo();
+    }
+    // Ensure captions are disabled after loading
+    if (player.setOption) {
+      player.setOption('captions', 'off');
     }
   }, [videoId]);
 
@@ -792,10 +772,10 @@ function RoomPage() {
                         No borders. No limits. Choose a video and experience seamless synchronization.
                       </p>
                       <button type="button" className="room-video-start-button" onClick={openVideoModal} aria-label="Add a video">
-                          <span>Add a video</span>
-                          <svg className="room-video-start-arrow" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none">
-                            <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
+                        <span>Add a video</span>
+                        <svg className="room-video-start-arrow" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none">
+                          <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -1048,18 +1028,13 @@ function RoomPage() {
             }`}>
             {/* Sidebar navigation */}
             <div className="room-sidebar-tabs-shell border-b border-inherit shrink-0">
-              <div ref={roomTabsRef} className={`room-sidebar-tabs${isDark ? "" : " is-light"}`}>
-                <div
-                  className="room-sidebar-tab-indicator"
-                  style={tabCapsuleStyle}
-                />
-
+              <div className={`room-sidebar-tabs${isDark ? "" : " is-light"}`}>
                 <button
                   type="button"
                   onClick={() => setCurrentTab("chat")}
                   className={`room-sidebar-tab${currentTab === "chat" ? " is-active" : ""}`}
                 >
-                  <span ref={(node) => { roomTabContentRefs.current.chat = node; }} className="room-sidebar-tab-content">Live Chat</span>
+                  <span className="room-sidebar-tab-content">Live Chat</span>
                 </button>
 
                 <button
@@ -1067,22 +1042,22 @@ function RoomPage() {
                   onClick={() => setCurrentTab("audience")}
                   className={`room-sidebar-tab${currentTab === "audience" ? " is-active" : ""}`}
                 >
-                  <span ref={(node) => { roomTabContentRefs.current.audience = node; }} className="room-sidebar-tab-content">
+                  <span className="room-sidebar-tab-content">
                     <span>Audience</span>
                   </span>
                 </button>
 
                 {canStartVideo ? (
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab("requests")}
-                  className={`room-sidebar-tab${currentTab === "requests" ? " is-active" : ""}`}
-                >
-                  <span ref={(node) => { roomTabContentRefs.current.requests = node; }} className="room-sidebar-tab-content">
-                    <span>Requests</span>
-                    {actionRequests.length > 0 && <span className="room-sidebar-count">{actionRequests.length}</span>}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentTab("requests")}
+                    className={`room-sidebar-tab${currentTab === "requests" ? " is-active" : ""}`}
+                  >
+                    <span className="room-sidebar-tab-content">
+                      <span>Requests</span>
+                      {actionRequests.length > 0 && <span className="room-sidebar-count">{actionRequests.length}</span>}
+                    </span>
+                  </button>
                 ) : null}
               </div>
             </div>
@@ -1095,38 +1070,38 @@ function RoomPage() {
                   {chatMessages.map((msg) => {
                     const isOwnMessage = !msg.isSystem && Boolean(socketRef.current?.id) && msg.id?.startsWith(`${socketRef.current.id}-`);
                     return (
-                    <div key={msg.id} className="flex flex-col text-sm">
-                      <div className="flex w-full items-center gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`truncate text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
-                            {msg.name}
-                          </span>
-                          {msg.role && msg.role !== "PARTICIPANT" && (
-                            <span className={`shrink-0 text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
-                              }`}>
-                              {msg.role === "MODERATOR" ? "MOD" : msg.role}
+                      <div key={msg.id} className="flex flex-col text-sm">
+                        <div className="flex w-full items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`truncate text-[11px] font-semibold ${msg.isSystem ? "opacity-40" : ""}`}>
+                              {msg.name}
                             </span>
-                          )}
+                            {msg.role && msg.role !== "PARTICIPANT" && (
+                              <span className={`shrink-0 text-[9px] px-1.5 py-0.2 rounded-md font-mono font-medium ${isDark ? "bg-[#272727] text-neutral-300" : "bg-[#E5E5E5] text-neutral-700"
+                                }`}>
+                                {msg.role === "MODERATOR" ? "MOD" : msg.role}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-0.5 flex w-full items-end gap-2">
+                          <p className={`border rounded-2xl px-3.5 py-2 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
+                            ? isDark
+                              ? "bg-[#181818] border-[#272727] text-neutral-400"
+                              : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
+                            : isOwnMessage
+                              ? isDark
+                                ? "bg-[#211817] border-[#3B2926] text-[#F3E7E5]"
+                                : "bg-[#FFF1EF] border-[#F1D2CD] text-[#34211F]"
+                              : isDark
+                                ? "bg-[#181818] border-[#272727] text-neutral-200"
+                                : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
+                            }`}>
+                            {msg.text}
+                          </p>
+                          {msg.sentAt && <span className="mb-1 ml-auto shrink-0 text-right text-[10px] opacity-40">{new Date(msg.sentAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
                         </div>
                       </div>
-                      <div className="mt-0.5 flex w-full items-end gap-2">
-                        <p className={`border rounded-2xl px-3.5 py-2 self-start break-words max-w-[90%] shadow-sm text-xs ${msg.isSystem
-                          ? isDark
-                            ? "bg-[#181818] border-[#272727] text-neutral-400"
-                            : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-600"
-                          : isOwnMessage
-                            ? isDark
-                              ? "bg-[#211817] border-[#3B2926] text-[#F3E7E5]"
-                              : "bg-[#FFF1EF] border-[#F1D2CD] text-[#34211F]"
-                            : isDark
-                              ? "bg-[#181818] border-[#272727] text-neutral-200"
-                              : "bg-[#F2F2F2] border-[#E5E5E5] text-neutral-800"
-                          }`}>
-                          {msg.text}
-                        </p>
-                        {msg.sentAt && <span className="mb-1 ml-auto shrink-0 text-right text-[10px] opacity-40">{new Date(msg.sentAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
-                      </div>
-                    </div>
                     );
                   })}
                 </div>
