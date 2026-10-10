@@ -1039,7 +1039,7 @@
   align-items: center;
   display: flex;
   flex-shrink: 0;
-  height: 48px;
+  height: 72px;
   justify-content: space-between;
 }
 
@@ -1050,12 +1050,16 @@
   user-select: none;
 }
 
-.exact-brand-mark {
-  background: #f00;
-  border-radius: 2px;
-  box-shadow: 0 0 8px rgba(255, 0, 0, .5);
-  flex: 0 0 14px;
-  height: 14px;
+.exact-brand-logo {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: block;
+  flex: 0 0 64px;
+  height: 64px;
+  object-fit: contain;
+  width: 64px;
 }
 
 .exact-brand-name {
@@ -1101,6 +1105,28 @@
   border-radius: 50%;
   height: 8px;
   width: 8px;
+  animation: exact-live-dot-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+}
+
+@keyframes exact-live-dot-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    opacity: .75;
+    transform: scale(.92);
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, .14), 0 0 12px rgba(16, 185, 129, .4);
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exact-live-counter i {
+    animation: none;
+  }
 }
 
 .exact-tools .theme-toggle {
@@ -3047,6 +3073,18 @@ input::placeholder {
 
 .room-brand .brand-dot {
   background: #d7f36b;
+}
+
+.watch-room-page .room-header .room-brand-logo {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: block;
+  flex: 0 0 48px;
+  height: 48px;
+  object-fit: contain;
+  width: 48px;
 }
 
 .room-heading {
@@ -5539,13 +5577,13 @@ input:focus {
     padding: 10px !important;
   }
 
-  .watch-room-page .playback-controls>div:first-child {
+  .watch-room-page .playback-controls .playback-seek {
     align-items: flex-start;
     flex-direction: column;
     gap: 7px;
   }
 
-  .watch-room-page .playback-controls>div:first-child>span {
+  .watch-room-page .playback-controls .playback-seek>span {
     font-size: 10px;
   }
 
@@ -6221,19 +6259,19 @@ input:focus {
   background-color: #fff !important;
 }
 
-.watch-room-page .playback-actions > button:first-child svg {
+.watch-room-page .playback-actions>button:first-child svg {
   height: 24px !important;
   width: 24px !important;
 }
 
-.watch-room-page .playback-actions > .playback-icon:first-child {
+.watch-room-page .playback-actions>.playback-icon:first-child {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
   transition: color .18s ease, transform .18s ease;
 }
 
-.watch-room-page .playback-actions > .playback-icon:first-child:hover {
+.watch-room-page .playback-actions>.playback-icon:first-child:hover {
   background: transparent !important;
   color: #ff6b61 !important;
   transform: translateY(-1px) scale(1.08);
@@ -7148,7 +7186,7 @@ input:focus {
 .watch-room-page .room-workspace>div,
 .watch-room-page section,
 .watch-room-page .playback-controls,
-.watch-room-page .playback-controls>div:first-child {
+.watch-room-page .playback-controls .playback-seek {
   min-width: 0;
 }
 
@@ -7254,19 +7292,19 @@ input:focus {
     padding-inline: 12px !important;
   }
 
-  .watch-room-page .playback-controls>div:first-child {
+  .watch-room-page .playback-controls .playback-seek {
     align-items: center !important;
     flex-direction: row !important;
     gap: 8px !important;
   }
 
-  .watch-room-page .playback-controls>div:first-child>div {
+  .watch-room-page .playback-controls .playback-seek>div {
     flex: 1 1 auto;
     min-width: 0;
     width: auto;
   }
 
-  .watch-room-page .playback-controls>div:first-child>span {
+  .watch-room-page .playback-controls .playback-seek>span {
     flex: 0 0 auto;
     font-size: 9px !important;
     white-space: nowrap;
@@ -7662,4 +7700,173 @@ input:focus {
   stroke-linejoin: round;
   stroke-width: 2;
   width: 17px;
+}
+
+/* Slim player controls: keep the timeline and actions, remove the heavy card. */
+.watch-room-page .playback-controls {
+  backdrop-filter: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  gap: 12px !important;
+  min-height: 38px;
+  padding: 0 !important;
+}
+
+.watch-room-page .playback-controls .playback-seek {
+  gap: 10px !important;
+}
+
+.watch-room-page .playback-controls .seek-slider::-webkit-slider-thumb {
+  appearance: none;
+  background: #ff5148;
+  border: 2px solid rgba(255, 255, 255, .95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+  box-sizing: border-box;
+  height: 12px;
+  transition: box-shadow .18s ease, transform .18s ease;
+  width: 12px;
+}
+
+.watch-room-page .playback-controls .seek-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 3px rgba(255, 81, 72, .16), 0 2px 5px rgba(0, 0, 0, .28);
+  transform: scale(1.16);
+}
+
+.watch-room-page .playback-controls .seek-slider::-moz-range-thumb {
+  background: #ff5148;
+  border: 2px solid rgba(255, 255, 255, .95);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+  box-sizing: border-box;
+  cursor: pointer;
+  height: 12px;
+  transition: box-shadow .18s ease, transform .18s ease;
+  width: 12px;
+}
+
+.watch-room-page .playback-controls .seek-slider::-moz-range-thumb:hover {
+  box-shadow: 0 0 0 3px rgba(255, 81, 72, .16), 0 2px 5px rgba(0, 0, 0, .28);
+  transform: scale(1.16);
+}
+
+.watch-room-page .playback-actions .playback-icon {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  color: #aeb2bb;
+  height: 32px !important;
+  min-width: 32px;
+  padding: 6px !important;
+  transition: background-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.watch-room-page .playback-actions .playback-icon:hover {
+  background: rgba(255, 81, 72, .1) !important;
+  color: #ff766e;
+  transform: translateY(-1px);
+}
+
+.watch-room-page.theme-light .playback-actions .playback-icon {
+  color: #626976;
+}
+
+.watch-room-page.theme-light .playback-actions .playback-icon:hover {
+  background: rgba(255, 81, 72, .09) !important;
+  color: #d83e36;
+}
+
+@media (max-width: 640px) {
+  .watch-room-page .playback-controls {
+    gap: 8px !important;
+  }
+}
+
+.watch-room-page .playback-main-toggle {
+  align-items: center;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  color: #aeb2bb;
+  display: inline-flex;
+  height: 32px !important;
+  justify-content: center;
+  min-width: 32px;
+  padding: 4px !important;
+  transition: background-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.watch-room-page .playback-main-toggle svg {
+  height: 24px !important;
+  width: 24px !important;
+}
+
+.watch-room-page .playback-main-toggle:hover {
+  background: rgba(255, 81, 72, .1) !important;
+  color: #ff766e;
+  transform: translateY(-1px);
+}
+
+.watch-room-page.theme-light .playback-main-toggle {
+  color: #626976;
+}
+
+.watch-room-page .playback-actions .skip-button {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -.05em;
+  line-height: 1;
+  padding: 0 !important;
+}
+
+.watch-room-page .playback-actions .playback-icon svg {
+  height: 20px !important;
+  width: 20px !important;
+}
+
+.watch-room-page .playback-actions .skip-controls {
+  gap: 2px !important;
+}
+
+@media (max-width: 640px) {
+  .watch-room-page .playback-controls {
+    align-items: center !important;
+    display: grid !important;
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .watch-room-page .playback-main-toggle {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .watch-room-page .playback-controls .playback-seek {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .watch-room-page .playback-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+  }
+}
+
+.watch-room-page .playback-actions .playback-icon:hover,
+.watch-room-page .playback-main-toggle:hover {
+  background: transparent !important;
+  color: #ff5148 !important;
+  transform: scale(1.16);
+  transform-origin: center;
+}
+
+.watch-room-page.theme-light .playback-actions .playback-icon:hover,
+.watch-room-page.theme-light .playback-main-toggle:hover {
+  background: transparent !important;
+  color: #e33b32 !important;
+  transform: scale(1.16);
+  transform-origin: center;
 }

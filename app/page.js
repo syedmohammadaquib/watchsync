@@ -167,7 +167,7 @@ export default function Home() {
             <div className="exact-main">
                 <nav className="exact-topbar" aria-label="Primary navigation">
                     <div className="exact-brand">
-                        <span className="exact-brand-mark" aria-hidden="true" />
+                        <img className="exact-brand-logo" src="/logo.png" alt="" aria-hidden="true" />
                         <span className="exact-brand-name"><span>watch</span><span>sync</span></span>
                     </div>
                     <div className="exact-tools">
