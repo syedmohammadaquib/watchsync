@@ -14,8 +14,6 @@ WatchSync is a real-time watch-party app. Create a room, share its code or link,
 
 ## Screenshots
 
-Add `home_page.png` and `room_page.png` to `docs/screenshots/`:
-
 ![WatchSync home page](docs/screenshots/home_page.png)
 ![WatchSync watch room](docs/screenshots/room_page.png)
 
@@ -79,10 +77,10 @@ The Next.js client embeds the YouTube IFrame Player and connects to the separate
 
 ## Deployment
 
-- Deploy the frontend to Vercel and set `NEXT_PUBLIC_SOCKET_URL` to the public Render server URL (no `/socket.io` suffix).
-- Deploy the `server` directory to Render with `DATABASE_URL`, `CLIENT_ORIGIN` set to the frontend origin, and `NODE_ENV=production`. Render supplies `PORT`.
-- Use a PostgreSQL database such as Neon. Keep database credentials in the server’s environment variables; never put secrets in `NEXT_PUBLIC_*`.
-- Check the server’s `GET /health` endpoint after deployment.
+- Deploy the frontend to Vercel and the `server` folder to Render.
+- In Vercel, set `NEXT_PUBLIC_SOCKET_URL` to your Render server URL.
+- In Render, set `DATABASE_URL` to your PostgreSQL connection string and `CLIENT_ORIGIN` to your Vercel site URL. Set `NODE_ENV` to `production`.
+- Check `https://your-render-server/health` to confirm the server is running. Keep database credentials in Render, not in frontend variables.
 
 The current realtime room coordination uses in-memory state on a single server instance, while room data is persisted in PostgreSQL. Multi-instance realtime scaling would require a shared Socket.IO adapter such as Redis.
 
