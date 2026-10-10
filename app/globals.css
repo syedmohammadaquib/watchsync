@@ -6488,7 +6488,7 @@ input:focus {
 }
 
 .watch-room-page .room-sidebar-tab.is-active {
-  color: #fff;
+  color: #17191e;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: normal;
@@ -6541,14 +6541,14 @@ input:focus {
 }
 
 .watch-room-page .room-sidebar-tab.is-active {
-  color: #fff;
+  color: #17191e;
   font-size: 13px;
   font-weight: 600;
 }
 
 .watch-room-page .room-sidebar-tab-indicator {
-  background: #2b3039;
-  border: 1px solid rgba(255, 255, 255, .13);
+  background: #fff;
+  border: 1px solid rgba(255, 255, 255, .75);
   border-radius: 999px;
   pointer-events: none;
   transition: left .42s cubic-bezier(.22, 1, .36, 1);
@@ -6572,12 +6572,12 @@ input:focus {
 }
 
 .watch-room-page .room-sidebar-tabs.is-light .room-sidebar-tab.is-active {
-  color: #fff;
+  color: #17191e;
 }
 
 .watch-room-page .room-sidebar-tabs.is-light .room-sidebar-tab-indicator {
-  background: #17191e;
-  border-color: rgba(15, 23, 42, .16);
+  background: #fff;
+  border-color: rgba(15, 23, 42, .12);
 }
 
 .watch-room-page>header.room-header {

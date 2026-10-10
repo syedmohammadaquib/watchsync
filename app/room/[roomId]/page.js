@@ -92,7 +92,7 @@ function RoomPage() {
   queueListRef.current = queueList;
   userRoleRef.current = currentUserRole;
   volumeRef.current = volume;
-  const chatAnchorRef = useRef(null);
+  const chatScrollRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const videoStageRef = useRef(null);
   const roomTabsRef = useRef(null);
@@ -368,7 +368,8 @@ function RoomPage() {
 
   useEffect(() => {
     if (currentTab === "chat") {
-      chatAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+      const chatScroll = chatScrollRef.current;
+      if (chatScroll) chatScroll.scrollTo({ top: chatScroll.scrollHeight, behavior: "smooth" });
     }
   }, [chatMessages, currentTab]);
 
@@ -1010,7 +1011,7 @@ function RoomPage() {
             {/* Pane 1: Live Chat Pane (Input strictly encapsulated here) */}
             {currentTab === "chat" && (
               <div className="room-sidebar-pane flex-1 flex flex-col min-h-0 overflow-hidden">
-                <div className="room-sidebar-scroll flex-1 overflow-y-auto p-3.5 space-y-3">
+                <div ref={chatScrollRef} className="room-sidebar-scroll flex-1 overflow-y-auto p-3.5 space-y-3">
                   {chatMessages.length === 0 && <p className="py-6 text-center text-xs opacity-50">No messages yet. Say hello to the room.</p>}
                   {chatMessages.map((msg) => {
                     const isOwnMessage = !msg.isSystem && Boolean(socketRef.current?.id) && msg.id?.startsWith(`${socketRef.current.id}-`);
@@ -1049,7 +1050,6 @@ function RoomPage() {
                     </div>
                     );
                   })}
-                  <div ref={chatAnchorRef} />
                 </div>
 
                 {/* Chat Form: Lives ONLY in chat pane */}
