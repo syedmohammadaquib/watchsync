@@ -75,6 +75,7 @@ function RoomPage() {
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState(null);
   const [hasHostStartedVideo, setHasHostStartedVideo] = useState(false);
+  const [hasPlaybackStarted, setHasPlaybackStarted] = useState(false);
   const [videoModalMode, setVideoModalMode] = useState("replace");
   const [toast, setToast] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
@@ -166,6 +167,7 @@ function RoomPage() {
         initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), videoId: nextVideoId, currentTime: nextTime, playState: playState || "paused" };
         setVideoId(nextVideoId || null);
         setHasHostStartedVideo(Boolean(nextVideoId));
+        setHasPlaybackStarted(false);
         setCurrentTime(Number(nextTime) || 0);
         if (playState) setIsPlaying(playState === "playing");
       };
@@ -314,7 +316,10 @@ function RoomPage() {
           },
           onStateChange: (event) => {
             const playerState = YT.PlayerState;
-            if (event.data === playerState.PLAYING) setIsPlaying(true);
+            if (event.data === playerState.PLAYING) {
+              setIsPlaying(true);
+              setHasPlaybackStarted(true);
+            }
             if (event.data === playerState.PAUSED || event.data === playerState.ENDED) setIsPlaying(false);
             setDuration(event.target.getDuration() || 0);
             if (event.data === playerState.ENDED && userRoleRef.current === "HOST" && queueListRef.current[0]) {
@@ -776,6 +781,21 @@ function RoomPage() {
                         <svg className="room-video-start-arrow" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none">
                           <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {hasHostStartedVideo && !isPlaying && !hasPlaybackStarted && (
+                  <div className="room-video-play-prompt">
+                    <div className="room-video-play-prompt-card">
+                      <span className="room-video-play-prompt-label">VIDEO READY</span>
+                      <p>Your video is ready. Press play to start watching together.</p>
+                      <button type="button" onClick={togglePlayback} aria-label={canStartVideo ? "Start watching the video" : "Request to play the video"}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M7 4.5v15l12-7.5-12-7.5z" />
+                        </svg>
+                        {canStartVideo ? "Start watching" : "Request to play"}
                       </button>
                     </div>
                   </div>

@@ -199,6 +199,76 @@
   transform: none;
 }
 
+.watch-room-page .room-video-play-prompt {
+  align-items: center;
+  background: radial-gradient(ellipse at center, rgba(12, 12, 14, .72), rgba(0, 0, 0, .42) 62%, rgba(0, 0, 0, .14));
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 10;
+}
+
+.watch-room-page .room-video-play-prompt-card {
+  color: #fff;
+  max-width: 420px;
+  text-align: center;
+}
+
+.watch-room-page .room-video-play-prompt-label {
+  color: rgba(255, 255, 255, .68);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .2em;
+}
+
+.watch-room-page .room-video-play-prompt-card p {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(18px, 2.2vw, 24px);
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 12px 0 20px;
+  text-wrap: balance;
+}
+
+.watch-room-page .room-video-play-prompt-card button {
+  align-items: center;
+  background: #ff3038;
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 999px;
+  box-shadow: 0 8px 28px rgba(255, 48, 56, .32);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 9px;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 20px;
+  pointer-events: auto;
+  transition: background .2s ease, transform .2s ease;
+}
+
+.watch-room-page .room-video-play-prompt-card button:hover {
+  background: #e6222b;
+  transform: translateY(-1px);
+}
+
+.watch-room-page .room-video-play-prompt-card button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.watch-room-page .room-video-play-prompt-card button svg {
+  fill: currentColor;
+  height: 16px;
+  width: 16px;
+}
+
 @keyframes room-video-minimal-breathe {
   from {
     opacity: .6;
