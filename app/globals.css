@@ -6592,7 +6592,7 @@ input:focus {
   gap: 7px;
   height: 42px;
   justify-content: center;
-  padding: 0 8px 8px;
+  padding: 8px 8px 8px;
   position: relative;
   transition: color .16s ease;
 }

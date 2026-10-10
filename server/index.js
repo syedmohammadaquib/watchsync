@@ -19,12 +19,12 @@ import {
 } from "./db.js";
 
 const port = Number(process.env.PORT || 4000);
-const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000")
+const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000,http://localhost:3001")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 const isAllowedOrigin = (origin, callback) => {
-    callback(null, !origin || clientOrigins.includes(origin));
+    callback(null, !origin || clientOrigins.includes(origin) || origin.startsWith("http://localhost:"));
 };
 const rooms = new Map();
 const roomLoadPromises = new Map();
