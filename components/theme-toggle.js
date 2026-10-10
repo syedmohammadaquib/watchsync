@@ -14,7 +14,7 @@ function getStoredTheme(defaultTheme) {
     return savedTheme === "dark" || savedTheme === "light" ? savedTheme : defaultTheme;
 }
 
-export function useTheme(defaultTheme = "light") {
+export function useTheme(defaultTheme = "dark") {
     return useSyncExternalStore(
         subscribe,
         () => getStoredTheme(defaultTheme),
@@ -22,18 +22,17 @@ export function useTheme(defaultTheme = "light") {
     );
 }
 
-export default function ThemeToggle({ defaultTheme = "light", selectedTheme, onThemeChange }) {
+export default function ThemeToggle({ defaultTheme = "dark", selectedTheme, onThemeChange }) {
     const storedTheme = useTheme(defaultTheme);
     const theme = selectedTheme || storedTheme;
 
     function toggleTheme() {
         const nextTheme = theme === "dark" ? "light" : "dark";
-        if (onThemeChange) {
-            onThemeChange(nextTheme);
-            return;
-        }
         window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
         window.dispatchEvent(new Event("watchsync-theme-change"));
+        if (onThemeChange) {
+            onThemeChange(nextTheme);
+        }
     }
 
     return (

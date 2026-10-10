@@ -3,7 +3,7 @@
 import React, { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createWatchSyncSocket } from "@/lib/socket";
-import ThemeToggle from "@/components/theme-toggle";
+import ThemeToggle, { useTheme } from "@/components/theme-toggle";
 
 function extractYouTubeVideoId(value) {
   const input = value.trim();
@@ -60,7 +60,8 @@ function RoomPage() {
   const currentUserRole = selfRole;
   const canStartVideo = currentUserRole === "HOST" || currentUserRole === "MODERATOR";
   const roleLabel = currentUserRole === "HOST" ? "Host" : currentUserRole === "MODERATOR" ? "Moderator" : "Viewer";
-  const [isDark, setIsDark] = useState(true);
+  const theme = useTheme("dark");
+  const isDark = theme === "dark";
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(80);
@@ -693,7 +694,6 @@ function RoomPage() {
                 selectedTheme={isDark ? "dark" : "light"}
                 defaultTheme={isDark ? "dark" : "light"}
                 onThemeChange={(nextTheme) => {
-                  setIsDark(nextTheme === "dark");
                   showToastMsg(nextTheme === "dark" ? "Dark mode activated" : "Light mode activated");
                 }}
               />
