@@ -59,6 +59,7 @@ function RoomPage() {
   const [connectionState, setConnectionState] = useState("connecting");
   const currentUserRole = selfRole;
   const canStartVideo = currentUserRole === "HOST" || currentUserRole === "MODERATOR";
+  const roleLabel = currentUserRole === "HOST" ? "Host" : currentUserRole === "MODERATOR" ? "Moderator" : "Viewer";
   const [isDark, setIsDark] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -327,7 +328,7 @@ function RoomPage() {
         width: "100%",
         height: "100%",
         videoId: videoId || undefined,
-        playerVars: { controls: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, enablejsapi: 1 },
+        playerVars: { controls: 0, cc_load_policy: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, enablejsapi: 1 },
         events: {
           onReady: (event) => {
             const roomState = initialRoomStateRef.current;
@@ -627,20 +628,6 @@ function RoomPage() {
           </section>
         </div>
       )}
-      {canStartVideo && actionRequests.length > 0 && (
-        <div className="fixed right-4 top-20 z-[60] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-3">
-          {actionRequests.map((request) => (
-            <section key={request.id} className={`rounded-2xl border p-4 shadow-2xl ${isDark ? "border-[#3b2926] bg-[#181818] text-white" : "border-[#f1d2cd] bg-white text-[#0f0f0f]"}`} role="dialog" aria-label="Action request">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-red-500">Permission request</p>
-              <p className="mt-2 text-sm font-semibold">{request.username} requested {request.action === "changeVideo" ? "a video change" : request.action === "seek" ? "to seek the timeline" : `${request.action} playback`}.</p>
-              <div className="mt-3 flex justify-end gap-2">
-                <button type="button" onClick={() => approveActionRequest(request, false)} className="rounded-lg px-3 py-2 text-xs font-semibold opacity-70 hover:opacity-100">Decline</button>
-                <button type="button" onClick={() => approveActionRequest(request, true)} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-500">Approve</button>
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
       {!canStartVideo && pendingRequestConfirmation && (
         <div className={`room-video-modal-backdrop ${isDark ? "room-video-modal-dark" : "room-video-modal-light"}`} role="presentation">
           <section className="room-video-modal request-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="request-confirmation-title">
@@ -823,7 +810,7 @@ function RoomPage() {
                 {hasHostStartedVideo && <div className={`absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 backdrop-blur-md border px-3 py-1.5 rounded-full text-[11px] font-medium shadow-lg ${isDark ? "bg-[#0F0F0F]/80 border-[#272727] text-neutral-200" : "bg-white/90 border-[#E5E5E5] text-neutral-800"
                   }`}>
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>You have host control</span>
+                  <span>{roleLabel} control</span>
                 </div>}
 
                 {/* Floating reactions remain emoji-based; the trigger below uses a regular icon. */}
