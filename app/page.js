@@ -111,6 +111,10 @@ export default function Home() {
                 throw new Error(result?.message || "Unable to prepare this room.");
             }
             window.sessionStorage.setItem(`watchsync-room-${code}`, JSON.stringify({ roomId: code, name: cleanName, mode }));
+            if (mode === "join") {
+                router.push(`/room/${code}`);
+                return;
+            }
             setLinkCopied(false);
             setCodeCopied(false);
             setReadyRoom({ code, name: cleanName });
