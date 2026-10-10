@@ -10,7 +10,7 @@ Watch YouTube together, in sync.
 
 WatchSync is a real-time watch-party app. Create a room, share its code or link, and watch YouTube videos together with synchronized playback, chat, and participant roles.
 
-> **Live app:** Replace `ADD_YOUR_LIVE_APP_URL` with the deployed frontend URL before submitting.
+> **Live app:** [https://watchsync-blue.vercel.app/](https://watchsync-blue.vercel.app/)
 
 ## Screenshots
 
