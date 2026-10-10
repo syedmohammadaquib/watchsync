@@ -80,6 +80,8 @@ function RoomPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [queueList, setQueueList] = useState([]);
+  const [actionRequests, setActionRequests] = useState([]);
+  const [pendingRequestConfirmation, setPendingRequestConfirmation] = useState(null);
 
   const socketRef = useRef(null);
   const youtubeMountRef = useRef(null);
@@ -98,6 +100,11 @@ function RoomPage() {
   const roomTabsRef = useRef(null);
   const roomTabContentRefs = useRef({});
   const [tabCapsuleStyle, setTabCapsuleStyle] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  useEffect(() => {
+    if (canStartVideo && currentTab === "queue") setCurrentTab("requests");
+    if (!canStartVideo && (currentTab === "requests" || currentTab === "queue")) setCurrentTab("chat");
+  }, [canStartVideo, currentTab]);
 
   useLayoutEffect(() => {
     const tabs = roomTabsRef.current;
@@ -211,6 +218,17 @@ function RoomPage() {
         }
       };
       const onQueueUpdated = ({ queue = [] } = {}) => setQueueList(queue);
+      const onActionRequest = (request) => {
+        if (userRoleRef.current === "HOST" || userRoleRef.current === "MODERATOR") {
+          setActionRequests((current) => current.some((entry) => entry.id === request.id) ? current : [...current, request]);
+        }
+      };
+      const onActionRequestResolved = ({ requestId } = {}) => {
+        setActionRequests((current) => current.filter((entry) => entry.id !== requestId));
+      };
+      const onActionRequestResult = ({ approved } = {}) => {
+        showToastMsg(approved ? "Your request was approved." : "Your request was declined.");
+      };
       const onReaction = ({ id, emoji, name } = {}) => {
         const reactionId = id || `${Date.now()}-${Math.random()}`;
         setReactions((current) => [...current, { id: reactionId, emoji, name, offsetRight: 14 + Math.floor(Math.random() * 38) }]);
@@ -243,6 +261,9 @@ function RoomPage() {
       socket.on("video_updated", onVideoUpdated);
       socket.on("playback_updated", onPlaybackUpdated);
       socket.on("queue_updated", onQueueUpdated);
+      socket.on("action_request", onActionRequest);
+      socket.on("action_request_resolved", onActionRequestResolved);
+      socket.on("action_request_result", onActionRequestResult);
       socket.on("room_reaction", onReaction);
       socket.on("participant_removed", onRemoved);
       socket.on("room_ended", onEnded);
@@ -311,8 +332,11 @@ function RoomPage() {
           onReady: (event) => {
             const roomState = initialRoomStateRef.current;
             event.target.setVolume(volumeRef.current);
-            if (roomState?.videoId) event.target.seekTo(Number(roomState.currentTime) || 0, true);
-            if (roomState?.playState === "playing") event.target.playVideo();
+            if (roomState?.videoId) {
+              event.target.seekTo(Number(roomState.currentTime) || 0, true);
+              if (roomState.playState === "playing") event.target.playVideo();
+              else event.target.pauseVideo();
+            }
             setDuration(event.target.getDuration() || 0);
           },
           onStateChange: (event) => {
@@ -345,8 +369,15 @@ function RoomPage() {
     const player = youtubePlayerRef.current;
     if (!player || !videoId) return;
     const roomState = initialRoomStateRef.current || {};
-    player.loadVideoById({ videoId, startSeconds: Number(roomState.currentTime) || 0 });
-    if (roomState.playState !== "playing") player.pauseVideo();
+    const startSeconds = Number(roomState.currentTime) || 0;
+    if (roomState.playState === "playing") {
+      player.loadVideoById({ videoId, startSeconds });
+    } else {
+      // loadVideoById may autoplay while restoring a paused room. Cueing keeps
+      // the viewer at the shared timestamp without starting playback.
+      player.cueVideoById({ videoId, startSeconds });
+      player.pauseVideo();
+    }
   }, [videoId]);
 
   useEffect(() => {
@@ -434,6 +465,24 @@ function RoomPage() {
     setChatInput("");
   };
 
+  const askToSendRequest = (action, payload, description) => {
+    setPendingRequestConfirmation({ action, payload, description });
+  };
+
+  const sendConfirmedRequest = () => {
+    if (!pendingRequestConfirmation || !socketRef.current?.connected) {
+      setPendingRequestConfirmation(null);
+      if (!socketRef.current?.connected) showToastMsg("Reconnect before sending a request.");
+      return;
+    }
+    socketRef.current.emit("request_action", {
+      action: pendingRequestConfirmation.action,
+      ...pendingRequestConfirmation.payload,
+    });
+    setPendingRequestConfirmation(null);
+    showToastMsg("Request sent to the host or moderator.");
+  };
+
   const handleLoadVideo = (e) => {
     e.preventDefault();
     const nextVideoId = extractYouTubeVideoId(videoUrl);
@@ -445,6 +494,8 @@ function RoomPage() {
     if (videoModalMode === "queue") {
       socketRef.current.emit("queue_add", { videoId: nextVideoId });
       showToastMsg("Added to the room queue.");
+    } else if (!canStartVideo) {
+      askToSendRequest("changeVideo", { videoId: nextVideoId }, "change the shared video");
     } else {
       socketRef.current.emit("set_video", { videoId: nextVideoId });
       showToastMsg("Changing the shared video…");
@@ -467,9 +518,11 @@ function RoomPage() {
   };
 
   const seekBy = (amount) => {
-    if (!canStartVideo) return showToastMsg("Only the host or a moderator can control playback.");
     if (!socketRef.current?.connected) return showToastMsg("Reconnect before seeking the video.");
     const nextTime = Math.max(0, Math.min(duration || 86400, (youtubePlayerRef.current?.getCurrentTime?.() ?? currentTime) + amount));
+    if (!canStartVideo) {
+      return askToSendRequest("seek", { currentTime: nextTime }, "seek the shared timeline");
+    }
     setCurrentTime(nextTime);
     initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime };
     youtubePlayerRef.current?.seekTo(nextTime, true);
@@ -477,12 +530,14 @@ function RoomPage() {
   };
 
   const togglePlayback = () => {
-    if (!canStartVideo) return showToastMsg("Only the host or a moderator can control playback.");
     if (!videoId) return showToastMsg("Add a video before starting playback.");
     if (!socketRef.current?.connected) return showToastMsg("Reconnect before controlling playback.");
     const player = youtubePlayerRef.current;
     const nextTime = player?.getCurrentTime?.() ?? currentTime;
     const action = isPlaying ? "pause" : "play";
+    if (!canStartVideo) {
+      return askToSendRequest(action, { currentTime: nextTime }, `${action} the shared video`);
+    }
     setIsPlaying(action === "play");
     initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime, playState: action === "play" ? "playing" : "paused" };
     socketRef.current?.emit("playback_action", { action, currentTime: nextTime });
@@ -493,6 +548,9 @@ function RoomPage() {
   const seekTo = (time) => {
     if (!socketRef.current?.connected) return showToastMsg("Reconnect before seeking the video.");
     const nextTime = Math.max(0, Math.min(duration || 86400, Number(time) || 0));
+    if (!canStartVideo) {
+      return askToSendRequest("seek", { currentTime: nextTime }, "seek the shared timeline");
+    }
     setCurrentTime(nextTime);
     initialRoomStateRef.current = { ...(initialRoomStateRef.current || {}), currentTime: nextTime };
     youtubePlayerRef.current?.seekTo(nextTime, true);
@@ -519,6 +577,16 @@ function RoomPage() {
   const removeMember = (userId) => {
     if (!socketRef.current?.connected) return showToastMsg("Reconnect before removing a member.");
     socketRef.current?.emit("remove_participant", { userId });
+  };
+
+  const transferHost = (userId) => {
+    if (!socketRef.current?.connected) return showToastMsg("Reconnect before transferring the host role.");
+    socketRef.current.emit("transfer_host", { userId });
+  };
+
+  const approveActionRequest = (request, approved) => {
+    socketRef.current?.emit("approve_action_request", { requestId: request.id, approved });
+    setActionRequests((current) => current.filter((entry) => entry.id !== request.id));
   };
 
   return (
@@ -559,6 +627,40 @@ function RoomPage() {
           </section>
         </div>
       )}
+      {canStartVideo && actionRequests.length > 0 && (
+        <div className="fixed right-4 top-20 z-[60] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-3">
+          {actionRequests.map((request) => (
+            <section key={request.id} className={`rounded-2xl border p-4 shadow-2xl ${isDark ? "border-[#3b2926] bg-[#181818] text-white" : "border-[#f1d2cd] bg-white text-[#0f0f0f]"}`} role="dialog" aria-label="Action request">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-red-500">Permission request</p>
+              <p className="mt-2 text-sm font-semibold">{request.username} requested {request.action === "changeVideo" ? "a video change" : request.action === "seek" ? "to seek the timeline" : `${request.action} playback`}.</p>
+              <div className="mt-3 flex justify-end gap-2">
+                <button type="button" onClick={() => approveActionRequest(request, false)} className="rounded-lg px-3 py-2 text-xs font-semibold opacity-70 hover:opacity-100">Decline</button>
+                <button type="button" onClick={() => approveActionRequest(request, true)} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-500">Approve</button>
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+      {!canStartVideo && pendingRequestConfirmation && (
+        <div className={`room-video-modal-backdrop ${isDark ? "room-video-modal-dark" : "room-video-modal-light"}`} role="presentation">
+          <section className="room-video-modal request-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="request-confirmation-title">
+            <div className="room-video-modal-edge" />
+            <header>
+              <div>
+                <p>PERMISSION REQUEST</p>
+                <h2 id="request-confirmation-title">Send this request?</h2>
+              </div>
+            </header>
+            <p className="room-video-modal-message">
+              Do you really want to {pendingRequestConfirmation.description}? The host or moderator will decide whether to approve it.
+            </p>
+            <div className="room-video-modal-actions">
+              <button type="button" onClick={() => setPendingRequestConfirmation(null)} className="room-video-modal-cancel">Cancel</button>
+              <button type="button" onClick={sendConfirmedRequest} className="room-video-modal-submit">Send request</button>
+            </div>
+          </section>
+        </div>
+      )}
       <style>{`
         @keyframes igReactionFloat {
           0% {
@@ -590,9 +692,9 @@ function RoomPage() {
         <div className="flex items-center gap-3 sm:gap-5">
           <div className="flex items-center gap-2 select-none cursor-pointer">
             <img src="/logo.png" alt="" aria-hidden="true" className="room-brand-logo" />
-            <div className="flex items-baseline text-lg font-black tracking-tight">
-              <span className={isDark ? "text-white" : "text-[#0F0F0F]"}>watch</span>
-              <span className="text-[#FF3B30] ml-0.5">sync</span>
+            <div className={`room-wordmark flex items-baseline text-lg font-black tracking-tight ${isDark ? "text-white" : "text-[#0F0F0F]"}`}>
+              <span>watch</span>
+              <span>sync</span>
             </div>
           </div>
 
@@ -707,14 +809,12 @@ function RoomPage() {
                       <p className="room-video-waiting-copy">
                         No borders. No limits. Choose a video and experience seamless synchronization.
                       </p>
-                      {canStartVideo && (
-                        <button type="button" className="room-video-start-button" onClick={openVideoModal} aria-label="Add a video">
+                      <button type="button" className="room-video-start-button" onClick={openVideoModal} aria-label="Add a video">
                           <span>Add a video</span>
                           <svg className="room-video-start-arrow" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none">
                             <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
-                        </button>
-                      )}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -803,7 +903,7 @@ function RoomPage() {
               <button
                 type="button"
                 onClick={togglePlayback}
-                disabled={!videoId || !canStartVideo}
+                disabled={!videoId}
                 className="playback-icon playback-main-toggle shrink-0 self-center sm:self-auto"
                 title={isPlaying ? "Pause" : "Play"}
                 aria-label={isPlaying ? "Pause playback" : "Resume playback"}
@@ -837,7 +937,7 @@ function RoomPage() {
                     onChange={(e) => setCurrentTime(Number(e.target.value))}
                     onPointerUp={(e) => seekTo(e.currentTarget.value)}
                     onKeyUp={(e) => seekTo(e.currentTarget.value)}
-                    disabled={!videoId || !canStartVideo}
+                    disabled={!videoId}
                     className="seek-slider relative z-10 w-full h-1.5 bg-transparent appearance-none cursor-pointer focus:outline-none accent-[#FF0000]"
                   />
                 </div>
@@ -853,7 +953,7 @@ function RoomPage() {
                   <button
                     type="button"
                     onClick={() => seekBy(-10)}
-                    disabled={!videoId || !canStartVideo}
+                    disabled={!videoId}
                     className="playback-icon skip-button"
                     title="Skip back 10 seconds"
                     aria-label="Skip back 10 seconds"
@@ -863,7 +963,7 @@ function RoomPage() {
                   <button
                     type="button"
                     onClick={() => seekBy(10)}
-                    disabled={!videoId || !canStartVideo}
+                    disabled={!videoId}
                     className="playback-icon skip-button"
                     title="Skip forward 10 seconds"
                     aria-label="Skip forward 10 seconds"
@@ -944,7 +1044,7 @@ function RoomPage() {
                 </button>
 
                 {/* Change Video Action Pill */}
-                {canStartVideo && <button
+                <button
                   type="button"
                   onClick={openVideoModal}
                   className="change-video-trigger"
@@ -956,7 +1056,7 @@ function RoomPage() {
                     </svg>
                   </span>
                   <span>Change video</span>
-                </button>}
+                </button>
               </div>
             </div>
           </section>
@@ -990,15 +1090,18 @@ function RoomPage() {
                   </span>
                 </button>
 
+                {canStartVideo ? (
                 <button
                   type="button"
-                  onClick={() => setCurrentTab("queue")}
-                  className={`room-sidebar-tab${currentTab === "queue" ? " is-active" : ""}`}
+                  onClick={() => setCurrentTab("requests")}
+                  className={`room-sidebar-tab${currentTab === "requests" ? " is-active" : ""}`}
                 >
-                  <span ref={(node) => { roomTabContentRefs.current.queue = node; }} className="room-sidebar-tab-content">
-                    <span>Queue</span>
+                  <span ref={(node) => { roomTabContentRefs.current.requests = node; }} className="room-sidebar-tab-content">
+                    <span>Requests</span>
+                    {actionRequests.length > 0 && <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] text-white">{actionRequests.length}</span>}
                   </span>
                 </button>
+                ) : null}
               </div>
             </div>
 
@@ -1107,6 +1210,9 @@ function RoomPage() {
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border ${isDark ? "bg-[#272727] border-[#383838] text-neutral-300" : "bg-[#E5E5E5] border-[#D5D5D5] text-neutral-800"}`}>HOST</span>
                         ) : currentUserRole === "HOST" && !isSelf ? (
                           <div className="flex items-center gap-1.5 shrink-0">
+                            <button type="button" onClick={() => transferHost(participant.userId)} className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"}`}>
+                              Transfer
+                            </button>
                             <button type="button" onClick={() => updateMemberRole(participant.userId, participant.role === "MODERATOR" ? "PARTICIPANT" : "MODERATOR")} className={`px-2.5 py-1 text-[11px] rounded-lg transition font-medium ${isDark ? "bg-[#272727] hover:bg-[#333] text-neutral-300" : "bg-[#E5E5E5] hover:bg-[#D5D5D5] text-neutral-700"}`}>
                               {participant.role === "MODERATOR" ? "Demote" : "Mod"}
                             </button>
@@ -1127,8 +1233,37 @@ function RoomPage() {
               </div>
             )}
 
-            {/* Pane 3: Queue Pane (Fills vertical height cleanly, NO chat input) */}
-            {currentTab === "queue" && (
+            {/* Pane 3: Private request review pane for hosts and moderators */}
+            {currentTab === "requests" && canStartVideo && (
+              <div className={`room-sidebar-pane request-panel flex-1 flex flex-col overflow-hidden min-h-0 ${isDark ? "is-dark" : "is-light"}`}>
+                <div className="request-panel-header">
+                  <p className="request-panel-title">Requests</p>
+                  <div className="request-panel-count">
+                    {actionRequests.length} {actionRequests.length === 1 ? "request" : "requests"}
+                  </div>
+                </div>
+                <div className="room-sidebar-scroll request-panel-list flex-1 overflow-y-auto">
+                  {actionRequests.length === 0 && <div className="request-empty-state"><p>No requests yet</p></div>}
+                  {actionRequests.map((request) => (
+                    <article key={request.id} className="request-card">
+                      <div className="request-card-content">
+                        <p className="request-user-name">{request.username}</p>
+                        <p className="request-card-action-text">
+                          {request.action === "changeVideo" ? "wants to change the video" : request.action === "seek" ? "wants to seek the timeline" : `wants to ${request.action} the video`}
+                        </p>
+                      </div>
+                      <div className="request-card-actions">
+                        <button type="button" onClick={() => approveActionRequest(request, false)} className="request-decline-button">Decline</button>
+                        <button type="button" onClick={() => approveActionRequest(request, true)} className="request-approve-button">Approve</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pane 3: Queue Pane for viewers */}
+            {currentTab === "queue" && !canStartVideo && (
               <div className="room-sidebar-pane flex-1 flex flex-col justify-between p-4 overflow-hidden min-h-0 space-y-4">
                 <div className="room-sidebar-scroll space-y-3 overflow-y-auto min-h-0">
                   <div className={`p-3.5 rounded-2xl border space-y-2 ${isDark ? "bg-[#181818] border-[#272727]" : "bg-[#F8F8F9] border-[#E5E5E5]"

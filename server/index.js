@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { Server } from "socket.io";
 import {
     cleanupExpiredRooms,
@@ -98,6 +99,7 @@ function createRoom(roomId) {
             messages: [],
             queue: [],
             hostSessionId: null,
+            actionRequests: new Map(),
             state: { videoId: null, playState: "paused", currentTime: 0, updatedAt: Date.now() },
         });
     }
@@ -138,6 +140,16 @@ function publicRoom(room) {
 
 function canControlPlayback(participant) {
     return participant?.role === "HOST" || participant?.role === "MODERATOR";
+}
+
+function canApproveRequests(participant) {
+    return canControlPlayback(participant);
+}
+
+function emitToRequestReviewers(room, event, payload) {
+    for (const [socketId, participant] of room.participants) {
+        if (canApproveRequests(participant)) io.to(socketId).emit(event, payload);
+    }
 }
 
 function clearHostDisconnectTimer(roomId) {
@@ -290,6 +302,69 @@ io.on("connection", (socket) => {
         });
     });
 
+    socket.on("request_action", ({ action, currentTime, videoId } = {}) => {
+        const roomId = socket.data.roomId;
+        const room = roomId && rooms.get(roomId);
+        const participant = room?.participants.get(socket.id);
+        const validActions = ["play", "pause", "seek", "changeVideo"];
+        const nextTime = Number(currentTime);
+        if (!room || participant?.role !== "PARTICIPANT" || !validActions.includes(action)) return;
+        if (["play", "pause", "seek"].includes(action) && (!Number.isFinite(nextTime) || nextTime < 0)) return;
+        if (action === "changeVideo" && (typeof videoId !== "string" || !/^[\w-]{11}$/.test(videoId))) return;
+
+        const request = {
+            id: randomUUID(),
+            action,
+            currentTime: nextTime,
+            videoId: action === "changeVideo" ? videoId : undefined,
+            userId: socket.id,
+            username: participant.username,
+            createdAt: Date.now(),
+        };
+        room.actionRequests.set(request.id, request);
+        emitToRequestReviewers(room, "action_request", request);
+    });
+
+    socket.on("approve_action_request", async ({ requestId, approved } = {}) => {
+        const roomId = socket.data.roomId;
+        const room = roomId && rooms.get(roomId);
+        const approver = room?.participants.get(socket.id);
+        const request = room?.actionRequests.get(requestId);
+        if (!room || !canApproveRequests(approver) || !request) return;
+
+        room.actionRequests.delete(requestId);
+        emitToRequestReviewers(room, "action_request_resolved", { requestId });
+        const requester = io.sockets.sockets.get(request.userId);
+        requester?.emit("action_request_result", { requestId, approved: Boolean(approved) });
+        if (!approved) return;
+
+        try {
+            if (request.action === "changeVideo") {
+                room.state.videoId = request.videoId;
+                room.state.playState = "paused";
+                room.state.currentTime = 0;
+                room.state.updatedAt = Date.now();
+                await persistRoom(roomId);
+                io.to(roomId).emit("video_updated", { videoId: request.videoId, currentTime: 0, playState: "paused" });
+            } else {
+                room.state.playState = request.action === "seek"
+                    ? room.state.playState
+                    : request.action === "play" ? "playing" : "paused";
+                room.state.currentTime = request.currentTime;
+                room.state.updatedAt = Date.now();
+                await persistRoom(roomId);
+                io.to(roomId).emit("playback_updated", {
+                    action: request.action,
+                    currentTime: request.currentTime,
+                    updatedAt: room.state.updatedAt,
+                });
+            }
+        } catch (error) {
+            console.error("Unable to apply approved action request", error);
+            approver && socket.emit("room_error", { code: "PERSIST_FAILED", message: "The approved request could not be applied." });
+        }
+    });
+
     socket.on("assign_role", async ({ userId, role } = {}) => {
         const roomId = socket.data.roomId;
         const room = roomId && rooms.get(roomId);
@@ -313,6 +388,42 @@ io.on("connection", (socket) => {
             userId: target.userId,
             username: target.username,
             role: target.role,
+            participants: [...room.participants.values()],
+        });
+    });
+
+    socket.on("transfer_host", async ({ userId } = {}) => {
+        const roomId = socket.data.roomId;
+        const room = roomId && rooms.get(roomId);
+        const currentHost = room?.participants.get(socket.id);
+        const target = room?.participants.get(userId);
+        const targetSocket = io.sockets.sockets.get(userId);
+        if (!room || currentHost?.role !== "HOST" || !target || target === currentHost || !targetSocket?.data.sessionId) return;
+
+        currentHost.role = "PARTICIPANT";
+        target.role = "HOST";
+        room.hostSessionId = targetSocket.data.sessionId;
+        room.rolesBySession.set(socket.data.sessionId, "PARTICIPANT");
+        room.rolesBySession.set(targetSocket.data.sessionId, "HOST");
+        try {
+            await updateMemberRole(roomId, socket.data.sessionId, "PARTICIPANT");
+            await updateMemberRole(roomId, targetSocket.data.sessionId, "HOST");
+            await persistRoom(roomId);
+        } catch (error) {
+            console.error("Unable to persist host transfer", error);
+            socket.emit("room_error", { code: "PERSIST_FAILED", message: "The host transfer could not be saved." });
+            return;
+        }
+        io.to(roomId).emit("role_assigned", {
+            userId: socket.id,
+            username: currentHost.username,
+            role: "PARTICIPANT",
+            participants: [...room.participants.values()],
+        });
+        io.to(roomId).emit("role_assigned", {
+            userId: target.userId,
+            username: target.username,
+            role: "HOST",
             participants: [...room.participants.values()],
         });
     });
